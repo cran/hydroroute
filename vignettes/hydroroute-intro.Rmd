@@ -1,0 +1,581 @@
+---
+title: "Introduction to hydroroute"
+author: "Julia Haider"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Introduction to hydroroute}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.align = 'center'
+)
+old <- options(useFancyQuotes = FALSE)
+library("hydroroute")
+```
+
+## Introduction
+
+The method developed by Greimel et al. (2016) detects and
+characterizes sub-daily flow fluctuations and is implemented in the R
+package hydropeak (available on
+[CRAN](https://CRAN.R-project.org/package=hydropeak)). Based on the
+events detected by the method implemented in package hydropeak,
+hydroroute identifies associated events in hydrographs from
+neighboring gauging stations and models the translation and retention
+processes between them (Greimel et al., 2022).
+
+This vignette presents the main function `peaktrace()` which given the
+events and relation information between gauging stations determines
+the associated events and based on these, estimates predictive models
+to trace initial values specified for the relevant metrics across the
+neighboring gauging stations. First, an overview on the input data
+required is given and the additional function `get_lag()` and
+variants thereof are presented which estimate the mean translation time of
+the hydrographs between adjacent gauging stations, if not already
+available. Then the individual function `estimate_AE()` is presented
+which is used by `peaktrace()` to identify the associated events
+(AEs). Finally the application of `peaktrace()` is illustrated and it
+is shown how the return value can be inspected.
+
+## Input data
+
+Several data files are required to perform the analysis. 
+
+### Dataset `Q`
+
+If the mean translation time between hydrographs at neighboring
+gauging stations is not given or known, the raw dataset `Q`,
+containing (equispaced) date-time values and the corresponding flow
+fluctuations, is needed. Based on these data the mean translation time
+between hydrographs at neighboring gauging stations may be estimated
+using `get_lag()`. The dataset `Q` needs to contain three variables:
+
+1. `ID` Character string which refers to the identifier of the gauging station 
+    (in Austria: HZBCODE).
+2. `Time` Character string with date-time information of stage measurements.
+3. `Q` Numeric, flow (stage measurements).
+
+The combination of `ID` and `Time` must be unique. Functions that use
+the dataset `Q` assume that these variables are contained in this
+order with exactly these names.  If this is not the case, i.e., if the
+columns have different names or are not in this order, the order can
+be specified in these functions with argument `cols`.  The columns are
+then renamed internally to make the data processable. Also the
+date-time format must be specified if it is different from the
+function's default format used.
+
+The following code loads the sample dataset `Q` and shows the first few rows:
+```{r}
+Q_path <- system.file("testdata", "Q.csv", package = "hydroroute")
+Q <- read.csv(Q_path)
+head(Q)
+```
+
+The sample dataset `Q` is a data frame with `r nrow(Q)` rows and
+`r ncol(Q)` variables as described above. The station ID's along the flow
+path are ``r paste(sort(unique(Q$ID)), collapse = ", ")``.
+The time ranges from ``r dQuote(min(Q$Time))`` to ``r dQuote(max(Q$Time))``.
+
+### Dataset `relation`
+
+The dataset `relation` provides information about the gauging stations
+of neighboring hydrographs. It contains:
+
+1. `ID` Character string which refers to the identifier of the gauging station 
+    (in Austria: HZBCODE).
+2. `Type` Character string which characterizes the source hydrograph
+    (`Turbine flow`, `Gauge`, `Basin outflow`).
+3. `Station` Character string which indicates the order of the `n` hydrographs 
+    in `relation` in downstream direction (`Si` with `i = 1, ..., n`).
+4. `fkm` Numeric, position of hydrograph in km relative to the source.
+5. `LAG` Character string which contains the cumulative mean
+    translation time (or estimated cumulative lag) between the source
+    and a specific gauging station in the format `HH:MM`. For `S1`
+    this is either indicated as missing (`NA`) or always given as
+    `00:00`. It is either already provided in `relation` or can be
+    estimated from the corresponding dataset `Q` with `get_lag()`.
+
+The following code loads an example dataset:
+
+```{r}
+relation_path <- system.file("testdata", "relation.csv", package = "hydroroute")
+relation <- read.csv(relation_path)
+relation
+```
+
+The dataset `relation` contains `r nrow(relation)` adjacent gauging stations.
+
+### Event files
+
+The output files from hydropeak's `get_events_*()` function are used
+to identify AEs. The naming scheme of the output files is
+`ID_event-type_date-time-from_date-time-to.csv`.  Event types are
+defined as follows:
+
+- 0: Constant event after an NA event (i.e., a missing event) or as first event in the time series.
+- 1: Constant event after a decreasing event.
+- 2: Increasing event (IC).
+- 3: Constant event after an increasing event.
+- 4: Decreasing event (DC).
+- 5: NA event.
+
+The most important event types for the following analysis are `2`
+(increasing event; IC) and `4` (decreasing event; DC).
+
+Package hydroroute includes 8 sample `Event` files for each gauging
+station ID contained in the sample dataset `Q` and event type `2` (IC)
+and `4` (DC) between `"2014-01-01 00:00:00"` and `"2014-02-28
+23:45:00"`. The increasing events for the station with ID `100000` are
+thus loaded using:
+
+```{r}
+Sx <- system.file("testdata", "Events", "100000_2_2014-01-01_2014-02-28.csv",
+                  package = "hydroroute")
+Sx <- read.csv(Sx)
+head(Sx)
+```
+
+## Get mean translation time between hydrographs with `get_lag()`
+
+For the identification of AEs, the translation time between
+neighboring hydrographs and the event amplitude have to be
+considered. For the first criterion, the mean translation time (`LAG`)
+between hydrographs has to be estimated and the cumulative values
+appended to the `relation` data for further processing, if not
+available yet.
+
+Function `get_lag_file()` uses:
+
+- `Q_file` A path to a file that contains the `Q` data from several
+  stations or a data frame that contains this information.
+- `relation_file` A path to a `relation` file. The `ID`s of the stations
+  must be in `Q`.
+
+If the argument `save` is `TRUE`, the `relation` data with appended
+`LAG` column is written to a file specified in `outfile`. If a `LAG`
+column already exists, argument `overwrite` has to be set to `TRUE` to
+overwrite the existing column. The function can be applied to several
+`relation` files by iterating over file paths or if a single `Q` data
+file is available, `get_lag_dir()` can be used. `relation` files can
+be selected from a directory using regular expressions (argument
+`relation_pattern`).
+
+The following code shows this for single file names:
+```{r}
+Q_file <- system.file("testdata", "Q.csv", package = "hydroroute")
+relation <- system.file("testdata", "relation.csv", package = "hydroroute")
+get_lag_file(Q_file, relation, inputsep = ",", format = "%Y-%m-%d %H:%M",
+             save = FALSE, overwrite = TRUE)
+```
+
+This code indicates the use with `get_lag_dir()` where the directory
+is specified:
+
+```{r}
+Q_file <- system.file("testdata", "Q.csv", package = "hydroroute")
+relations_path <- system.file("testdata", package = "hydroroute")
+get_lag_dir(Q_file, relations_path, inputsep = ",",
+            inputdec = ".", format = "%Y-%m-%d %H:%M", overwrite = TRUE)
+```
+
+## Estimate settings with `estimate_AE()`
+
+Greimel et al. (2022) propose the following algorithm to identify AEs:
+
+"Starting from every single event at the upstream hydrograph (`Sx`), the
+mean translation time between the hydrographs [...] is subtracted from
+the downstream hydrograph (`Sy`). This then captures several events from
+the downstream hydrograph within a time slot similar to the
+translation time. The event detected at `Sy` with the amplitude most
+similar to `Sx` is designated as potential AE. [...]
+
+For these events, then the relative difference in amplitude is
+determined. Parabolas are fitted to the histogram obtained for the relative 
+difference data binned into intervals from -1 to 1 of width 0.1 by fixing the 
+vertex at the inner maximum of the histogram and the width is determined by
+minimizing the average squared distance between the parabola and the
+histogram data along arbitrary symmetric ranges from the inner
+maximum. Based on the fitted parabola cut points with the x-axis are
+determined such that only those potential AEs are retained where the
+relative difference is within these cut points. If this automatic
+scheme does not succeed to determine suitable cut points, e.g.,
+because the estimated cut points are outside -1 and 1, then a strict
+criterion for the relative difference in amplitude is imposed to
+identify AEs considering only deviations of at most 10%."
+
+`estimate_AE()` estimates suitable settings for the amplitude based on
+the method developed in Greimel et al. (2022) for exact time matches.
+
+It performs this procedure for two neighboring hydrographs, i.e., it
+takes a subset of `relation` and the two corresponding `Event` files
+as input.  The gauging station `ID`s in the subset of `relation` and
+in the `Event` files must match.  Suitable settings for the amplitude
+are estimated as follows:
+
+- `Sy$Time` is shifted by the mean translation time between `Sx` and
+  `Sy`. 
+  
+- Based on the time, exact matches between `Sx` and `Sy`
+  are captured.
+
+- Relative difference in `AMP` are computed, e.g., `(Sy$AMP -
+  Sx$AMP) / Sx$AMP`.
+  
+- Matched events detected at `Sy` with the amplitude most similar to
+  `Sx` are filtered. However, only matched events with an amplitude at
+  `Sy` of at most two times the amplitude at `Sx` are considered as
+  potential AEs.
+    
+- The relative differences of potential AEs are binned into intervals of 
+  length 0.1 from -1 to 1. The created relative frequency table of the binned
+  relative differences is passed to function `get_parabola()` where
+  either suitable cut points with the x-axis are determined or a
+  strict criterion is returned.
+    
+- The table of the relative differences is visualized in a plot where
+  the fitted parabola and the cut points with the x-axis are also
+  shown.
+  
+- The estimated settings for amplitude, a data frame of "real" AEs,
+  i.e., associated events within the estimated cut points, and the
+  plot are returned.
+  
+Note that the metric flow ratio (RATIO) does not make sense for `S1`
+if the hydrograph is not of type `Gauge`. So metric `RATIO` is set to
+`NA` internally in this case.
+    
+The following code shows this procedure for two `Event` files:
+```{r}
+# file paths
+Sx <- system.file("testdata", "Events", "100000_2_2014-01-01_2014-02-28.csv",
+                  package = "hydroroute")
+Sy <- system.file("testdata", "Events", "200000_2_2014-01-01_2014-02-28.csv",
+                  package = "hydroroute")
+relation <- system.file("testdata", "relation.csv", package = "hydroroute")
+
+# read data
+Sx <- utils::read.csv(Sx)
+Sy <- utils::read.csv(Sy)
+relation <- utils::read.csv(relation)
+relation <- relation[1:2, ]
+
+# estimate AE, exact time matches
+results <- estimate_AE(Sx, Sy, relation, timeLag = c(0, 1, 0))
+```
+
+```{r}
+results$settings
+```
+Column `bound` represents the lower, inner and upper bounds that are used to subset
+potential AEs. `lag` represents the time lag. Only exact matches are used in this
+examples, which is specified by argument `timeLag = c(0, 1, 0)`, which refers to 
+0 deviation at the lower and upper bound and 1 at the inner bound, meaning, that 
+the mean translation time from `relation` is not altered when time matches are 
+computed. 
+
+
+```{r, fig.width = 6, fig.height = 3}
+results$plot_threshold
+```
+
+```{r}
+head(results$real_AE)
+```
+
+## Combine everything with `peaktrace()`
+
+Function `peaktrace` combines the identification of potential AEs and
+the estimation of suitable amplitude settings for a whole river
+section as specified in a `relation` file. In addition, the flow
+metrics of the AEs are pictured by scatter plots and the translation
+and retention process between the hydrographs is described by linear
+models.
+
+In the following, the input arguments of function `peaktrace()` are
+described:
+
+- `relation_path`: Is the path where the whole relation file from a
+  river section is to be read from.
+    
+- `events_path`: Is the path of the directory where the `Event` files
+  are located. These files must correspond to the format described
+  earlier in the section discussing the input data.
+    
+- `initial_values_path`: Is the path where initial values for
+  predicting the metric at the neighboring stations are to be read
+  from. It should not contain missing values. But missing values can be imputed
+  with a method specified in argument `impute_method`, which is by default `max`.
+  An example for such a file is:
+
+
+```{r}
+initial_values_path <- system.file("testdata", "initial_value_routing.csv",
+                                   package = "hydroroute")
+initials <- read.csv(initial_values_path)
+initials
+```
+
+The columns must be identical to this example. The content may
+vary. The initial values used for prediction must not contain any
+missing values. 
+
+- `Station` refers to the gauging station of the hydrograph. Here, all
+  initial values correspond to gauging station `S1` except for metric
+  `RATIO`, which starts at gauging station `S2`.
+    
+- `Metric` corresponds to the metric. This is used to pick the
+  corresponding fitted predictive model.
+    
+- `Value` can be chosen arbitrarily or estimated with a data-driven
+  approach. A unique `Name` is assigned which can be used to
+  characterize the curve obtained from this initial value used to
+  predict the metrics in downstream direction. E.g., for this example
+  the initial values are set to certain quantiles of the metrics at
+  station `S1`.
+
+The return value of function `peaktrace()` is structured as follows:
+
+- A named list with one list element for each `event_type`.
+- For each `event_type`:
+
+  1. One element that contains the estimated settings from
+     `estimate_AE()` for all gauging stations.
+     
+  2. Plot of relative differences of `AMP` with cut points from
+     settings_AE()` for all pairs of neighboring gauging stations.
+     
+  3. Real AEs according to the estimated settings from `estimate_AE()`
+     for all pairs of neighboring gauging stations and a column
+     `diff_metric` that contains the relative difference in `AMP`.
+    
+  4. A grid of scatter plots containing the AEs for neighboring
+     hydrographs and for each metric with the fitted regression line.
+	
+  5. Results of model fitting. Each row contains the corresponding
+     stations and metric, the model type (default: "lm"), formula,
+     coefficients, number of observations and $R^2$.
+	
+  6. Plot of predicted values based on the initial values. 
+
+```{r}
+relation_path <- system.file("testdata", "relation.csv", package = "hydroroute")
+events_path <- system.file("testdata", "Events", package = "hydroroute")
+initial_values_path <- system.file("testdata", "initial_value_routing.csv",
+                                   package = "hydroroute")
+res <- peaktrace(relation_path, events_path, initial_values_path)
+```
+
+The first list object refers to event type 2 (IC event). 
+
+```{r}
+res$`2`$settings
+```
+
+The `settings` data frame contains the estimated time lag and metric
+settings computed with `estimate_AE()`. In this example with 4
+stations, it contains nine rows where three rows describe the relation
+between two neighboring stations. Since only exact time matches were
+allowed, the `lag` values are 0 for `lower` and `upper` bound and 1 for `inner`. 
+`metric` contains the range of relative values of the amplitude allowed.  
+Events, where the relative difference in amplitude and the relative difference 
+in time are within these settings, are considered as "real" AE and therefore events
+caused by disruptive factors are excluded as far as possible.
+
+
+The following plot shows the histograms obtained for the relative
+differences in amplitude for each pair of neighboring gauging stations
+binned into intervals from -1 to 1 of width 0.1. The dashed line shows
+the fitted parabola and the cut points of the parabola with the x-axis
+are indicated. Potential AEs where the relative difference is within
+these cut points are considered as "real" AEs.
+
+```{r, fig.width = 8, fig.height = 3}
+grid::grid.draw(res$`2`$plot_threshold)
+```
+
+The "real" AEs can be insepcted using:
+
+```{r}
+head(res$`2`$real_AE)
+```
+
+The scatter plots of the metrics at the neighboring gauging stations
+for the "real" AEs are contained in `plot_scatter`. The scatter plots
+are arranged in a grid where each row contains scatter plots for a
+specific metric and each colums contains a different pair of
+neighboring gauging stations. The x-axis is the upstream hydrograph
+`Sx`, the y-axis is the downstream hydrograph `Sy`. A linear
+regression line and the corresponding $R^2$ value are added to each
+plot. By default the aspect ratio is fixed and the axis limits are
+equal within each plot.
+
+```{r, fig.width = 8, fig.height = 15}
+grid::grid.draw(res$`2`$plot_scatter)
+```
+
+The fitted regression models may also be inspected:
+
+```{r}
+res$`2`$models
+```
+
+The `models` data frame contains the fitted (linear) models for each pair of 
+neighboring stations and each metric. 
+
+- `station.x` is the upstream hydrograph `Sx`.
+- `station.y` is the downstream hydrograph `Sy`.
+- `metric` is the name of the corresponding metric.
+- `type` is the model class, by default `lm`.
+- `formula` is the expression that is used to fit the model.
+- `(Intercept)`, `x` are the extracted coefficients (called with `coef`).
+- `n` is the number of events used to fit the model.
+- `r2` is the extracted or computed $R^2$ for each model.
+
+Finally the fitted regression models are used to predict the values of
+the metrics along the longitudinal flow path given the initial values:
+
+```{r, fig.width = 8, fig.height = 10}
+gridExtra::grid.arrange(grobs = res$`2`$plot_predict$grobs, nrow = 3, ncol = 2)
+```
+
+If a file with initial values is passed to `peaktrace()`, predictions
+along the longitudinal flow path are made and visualized in a
+plot. Each line in the plot represents a different scenario, e.g., the
+uppermost solid lines for AMP, MAFR and MEFR represent the values of
+`Q_max` in the initial file. Starting from these initial values,
+predictions are made with the corresponding models, e.g.,  the first
+value of the initial valus file is passed to the model that describes
+the relationship of AMP between `S1` and `S2` to predict the value at
+`S2`.
+
+The initial value and the first fitted model are:
+
+```{r}
+initials[1, ]
+res$`2`$models[1, ]
+```
+
+The resulting predicted value is then passed to the next model along the flow 
+path, i.e., the model of `S2` and `S3` to predict the value at `S3`.
+
+```{r}
+res$`2`$models[6, ]
+```
+
+Finally, this predicted value is passed to the last model along this river 
+section: the model between `S3` and `S4` to predict the value at `S4`.
+
+```{r}
+res$`2`$models[11, ]
+```
+
+This procedure is repeated for all metrics according to the initial
+values file. Note that in this initial values file metric RATIO starts at
+station `S2`. Therefore the first value of RATIO to predict is at station
+`S3`.
+
+The second list object refers to event type 4 (DC event). The nested
+objects of this event type are shown below.
+
+```{r}
+res$`4`$settings
+```
+
+```{r}
+head(res$`4`$real_AE)
+```
+
+```{r, fig.width = 8, fig.height = 3}
+grid::grid.draw(res$`4`$plot_threshold)
+```
+
+```{r, fig.width = 8, fig.height = 15}
+grid::grid.draw(res$`4`$plot_scatter)
+```
+
+```{r}
+res$`4`$models
+```
+
+```{r, fig.width = 8, fig.height = 10}
+gridExtra::grid.arrange(grobs = res$`4`$plot_predict$grobs, nrow = 3, ncol = 2)
+```
+
+## Extract AEs and perform routing with existing settings
+
+If estimated settings are already available, it is possible to use the
+settings directly to extract "real" AEs from the `Event` data. For
+such an analysis, a path to a `relation` file must be provided, as
+well as a path to the `Event` data and paths to `settings` and initial
+values.
+
+### Extract AEs
+
+The following code shows the extraction of "real" AEs based on the
+`settings` file which is included in the package after having been
+generated with `estimate_AE()`.
+
+```{r}
+relation_path <- system.file("testdata", "relation.csv", package = "hydroroute")
+events_path <- system.file("testdata", "Events", package = "hydroroute")
+settings_path <- system.file("testdata", "Q_event_2_AMP-LAG_settings.csv",
+	                     package = "hydroroute")
+initials_path <- system.file("testdata", "initial_value_routing.csv",
+                             package = "hydroroute")
+real_AE <- extract_AE(relation_path, events_path, settings_path)
+head(real_AE)
+```
+
+### Routing
+
+With the extracted "real" AEs, the routing procedure can be performed to 
+describe the translation and retention processes between neighboring hydrographs. 
+
+Therefore, the output from `extract_AE()` (or similar, the output `$real_AE` from
+`estimate_AE()`), the initial values data frame and the `relation` data frame have to be
+passed to function `routing()`.
+
+```{r}
+relation <- utils::read.csv(relation_path)
+initials <- utils::read.csv(initials_path)
+res <- routing(real_AE, initials, relation)
+```
+
+This produces the same scatter plot as before when `peaktrace()` was called as the
+events and the settings are the same. 
+
+```{r, fig.width = 8, fig.height = 15}
+grid::grid.draw(res$plot_scatter)
+```
+
+```{r}
+res$models
+```
+
+
+```{r, fig.width = 8, fig.height = 10}
+gridExtra::grid.arrange(grobs = res$plot_predict$grobs, nrow = 3, ncol = 2)
+```
+
+```{r, include = FALSE}
+options(old)
+```
+
+## References
+
+Greimel F, Zeiringer B, Höller N, Grün B, Godina R, Schmutz S
+(2016). "A Method to Detect and Characterize Sub-Daily Flow
+Fluctuations." Hydrological Processes, 30(13), 2063-2078. doi:
+10.1002/hyp.10773
+
+Greimel F, Grün B, Hayes DS, Höller N, Haider J, Zeiringer B,
+Holzapfel P, Hauer C, Schmutz S (2022). "PeakTrace: Routing of
+Hydropower Plant-Specific Hydropeaking Waves Using Multiple
+Hydrographs - A Novel Approach." River Research and Applications,
+accepted with minor revisions.
