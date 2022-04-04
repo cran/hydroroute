@@ -31,14 +31,14 @@ get_parabola <- function(x, omit = 2) {
                 Inf
             } else {
                 coefs <- c(stats::coef(fit), b = b, c = istar)
-                xstar <- coefs["c"] + c(-1, 1) * sqrt(-coefs["b"] / coefs["a"])
+                xstar <- suppressWarnings(coefs["c"] + c(-1, 1) * sqrt(-coefs["b"] / coefs["a"]))
                 index <- which(seq_along(x) > xstar[1] & seq_along(x) < xstar[2]) - istar
                 ystar <- stats::predict(fit, data.frame(index = index))
                 mean((x[istar + index] - ystar)^2)
                 }
             }, FUN.VALUE = numeric(1))
         i <- which.min(error)
-        if (length(i) == 0) {
+        if (length(i) == 0 | is.infinite(error[i])) {
             result <- list()
         } else {
             index <- -i:i
@@ -46,7 +46,7 @@ get_parabola <- function(x, omit = 2) {
             b <- y[i + 1]
             fit <- stats::nls(y ~ a * index^2 + b, start = list(a = 0))
             coefs <- c(stats::coef(fit), b = b, c = istar)
-            xstar <- coefs["c"] + c(-1, 1) * sqrt(-coefs["b"] / coefs["a"])
+            xstar <- suppressWarnings(coefs["c"] + c(-1, 1) * sqrt(-coefs["b"] / coefs["a"]))
 
             summary_fit <- summary(fit)
 

@@ -46,11 +46,14 @@ Data frame that has a matched event at \eqn{S_{x}}{S_x} and
     \eqn{S_{y}}{S_y} in each row.
 }
 \description{
-Given two event data frames of neighboring stations \eqn{S_{x}}{S_x}
-    and \eqn{S_{y}}{S_y} that consist of flow fluctuation events and computed
-    metrics (see \code{\link[hydropeak:get_events]{hydropeak::get_events()}}),
-    the translation time between these two stations is subtracted from \eqn{S_{y}}{S_y}
-    and events are merged where exact matches can be found.
+Given two event data frames of neighboring stations
+    \eqn{S_{x}}{S_x} and \eqn{S_{y}}{S_y} that consist of flow
+    fluctuation events and computed metrics (see
+    \code{\link[hydropeak:get_events]{hydropeak::get_events()}}),
+    the translation time indicated by the relation file as well as
+    \code{timeLag} between these two stations is subtracted from
+    \eqn{S_{y}}{S_y} and events are merged where matches according
+    to differences allowed to \code{timeLag} can be found.
 }
 \examples{
 Sx <- system.file("testdata", "Events", "100000_2_2014-01-01_2014-02-28.csv",

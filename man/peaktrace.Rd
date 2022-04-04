@@ -8,6 +8,7 @@ peaktrace(
   relation_path,
   events_path,
   initial_values_path,
+  unique = c("time", "metric"),
   inputdec = ".",
   inputsep = ",",
   event_type = c(2, 4),
@@ -23,10 +24,10 @@ peaktrace(
 )
 }
 \arguments{
-\item{relation_path}{Character string containing the path of the file which
+\item{relation_path}{Character string containing the path of the file where
 the relation file is to be read from with
 \code{\link[utils:read.csv]{utils::read.csv()}}. The file must contain a
-column \code{ID} that contains the gauging station ID's in the file have to be
+column \code{ID} that contains the gauging station ID. ID's in the file have to be
 in order of their location in downstream direction.}
 
 \item{events_path}{Character string containing the path of the directory
@@ -37,6 +38,14 @@ the `relation' file.}
 \item{initial_values_path}{Character string containing the path of the file
 which contains initial values for predictions (see vignette).}
 
+\item{unique}{Character string specifying if the potential AEs which
+meet the \code{timeLag} and \code{metricLag} condition should
+be filtered to contain only unique events using \code{"time"},
+i.e., by selecting those where the time difference is smallest
+compared to the specified factor of the mean translation time, or using
+\code{"metric"}, i.e., by selecting those where the relative
+difference in amplitude is smallest (default: \code{"time"}).}
+
 \item{inputdec}{Character string for decimal points in input data.}
 
 \item{inputsep}{Field separator character string for input data.}
@@ -46,9 +55,9 @@ event files by their file names
 (see \code{\link[hydropeak:get_events]{hydropeak::get_events()}}).
 Default: \code{c(2, 4)}, i.e., increasing and decreasing events.}
 
-\item{saveResults}{A logical. If \code{FALSE} (default), the generated plot
+\item{saveResults}{A logical. If \code{FALSE} (default), the generated plots
 and the estimated settings are not saved. Otherwise the settings are written
-to a csv file and the plot are saved as png.}
+to a csv file and the plots are saved as png and pdf files.}
 
 \item{outdir}{Character string naming a directory where the estimated
 settings should be saved to.}
@@ -98,8 +107,8 @@ Estimates all settings based on the `relation' file of a river
     \code{event_type}. It fits models to describe translation and retention
     processes between neighboring hydrographs, and generates plots
     (see vignette for details). Given a file with initial values (see vignette),
-    predictions a made and visualized in a plot.
+    predictions are made and visualized in a plot.
     Optionally, the results can be written to a directory.
-    Make sure that all files have the same separator (\code{inputsep}) and
+    All files need to have the same separator (\code{inputsep}) and
     character for decimal points (\code{inputdec}).
 }

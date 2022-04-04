@@ -23,10 +23,10 @@ library("hydroroute")
 
 The method developed by Greimel et al. (2016) detects and
 characterizes sub-daily flow fluctuations and is implemented in the R
-package hydropeak (available on
+package **hydropeak** (available on
 [CRAN](https://CRAN.R-project.org/package=hydropeak)). Based on the
-events detected by the method implemented in package hydropeak,
-hydroroute identifies associated events in hydrographs from
+events detected by the method implemented in package **hydropeak**,
+**hydroroute** identifies associated events in hydrographs from
 neighboring gauging stations and models the translation and retention
 processes between them (Greimel et al., 2022).
 
@@ -58,8 +58,8 @@ using `get_lag()`. The dataset `Q` needs to contain three variables:
 
 1. `ID` Character string which refers to the identifier of the gauging station 
     (in Austria: HZBCODE).
-2. `Time` Character string with date-time information of stage measurements.
-3. `Q` Numeric, flow (stage measurements).
+2. `Time` Character string with date-time information of measurements.
+3. `Q` Numeric, flow measurements.
 
 The combination of `ID` and `Time` must be unique. Functions that use
 the dataset `Q` assume that these variables are contained in this
@@ -113,7 +113,7 @@ The dataset `relation` contains `r nrow(relation)` adjacent gauging stations.
 
 ### Event files
 
-The output files from hydropeak's `get_events_*()` function are used
+The output files from **hydropeak**'s `get_events_*()` function are used
 to identify AEs. The naming scheme of the output files is
 `ID_event-type_date-time-from_date-time-to.csv`.  Event types are
 defined as follows:
@@ -128,7 +128,7 @@ defined as follows:
 The most important event types for the following analysis are `2`
 (increasing event; IC) and `4` (decreasing event; DC).
 
-Package hydroroute includes 8 sample `Event` files for each gauging
+Package **hydroroute** includes 8 sample `Event` files for each gauging
 station ID contained in the sample dataset `Q` and event type `2` (IC)
 and `4` (DC) between `"2014-01-01 00:00:00"` and `"2014-02-28
 23:45:00"`. The increasing events for the station with ID `100000` are
@@ -170,8 +170,8 @@ The following code shows this for single file names:
 ```{r}
 Q_file <- system.file("testdata", "Q.csv", package = "hydroroute")
 relation <- system.file("testdata", "relation.csv", package = "hydroroute")
-get_lag_file(Q_file, relation, inputsep = ",", format = "%Y-%m-%d %H:%M",
-             save = FALSE, overwrite = TRUE)
+(get_lag_file(Q_file, relation, inputsep = ",", format = "%Y-%m-%d %H:%M",
+              save = FALSE, overwrite = TRUE))
 ```
 
 This code indicates the use with `get_lag_dir()` where the directory
@@ -179,38 +179,49 @@ is specified:
 
 ```{r}
 Q_file <- system.file("testdata", "Q.csv", package = "hydroroute")
-relations_path <- system.file("testdata", package = "hydroroute")
-get_lag_dir(Q_file, relations_path, inputsep = ",",
-            inputdec = ".", format = "%Y-%m-%d %H:%M", overwrite = TRUE)
+relations_path <- file.path(tempdir(), "testdata")
+dir.create(relations_path)
+file.copy(list.files(system.file("testdata", package = "hydroroute"),
+                     full.name = TRUE),
+          relations_path, recursive = FALSE, copy.mode = TRUE)
+(get_lag_dir(Q_file, relations_path, inputsep = ",",
+             inputdec = ".", format = "%Y-%m-%d %H:%M", overwrite = TRUE))
 ```
 
 ## Estimate settings with `estimate_AE()`
 
 Greimel et al. (2022) propose the following algorithm to identify AEs:
 
-"Starting from every single event at the upstream hydrograph (`Sx`), the
-mean translation time between the hydrographs [...] is subtracted from
-the downstream hydrograph (`Sy`). This then captures several events from
-the downstream hydrograph within a time slot similar to the
-translation time. The event detected at `Sy` with the amplitude most
-similar to `Sx` is designated as potential AE. [...]
+"For every event `x` at the upstream hydrograph, the mean translation
+time between the neighboring hydrographs (calculated by an
+autocorrelation analysis) is subtracted from the downstream
+hydrograph. This then captures several events from the downstream
+hydrograph within a time slot +/- the translation time. Among those
+matches only those events are retained where the relative difference
+in amplitude is +/- one. In the following, a potential AE is the event
+`y` detected with the smallest time difference to `x` after accounting
+for the mean translation time meeting the time and amplitude
+criteria. [...]
 
-For these events, then the relative difference in amplitude is
-determined. Parabolas are fitted to the histogram obtained for the relative 
-difference data binned into intervals from -1 to 1 of width 0.1 by fixing the 
-vertex at the inner maximum of the histogram and the width is determined by
-minimizing the average squared distance between the parabola and the
-histogram data along arbitrary symmetric ranges from the inner
-maximum. Based on the fitted parabola cut points with the x-axis are
-determined such that only those potential AEs are retained where the
-relative difference is within these cut points. If this automatic
-scheme does not succeed to determine suitable cut points, e.g.,
-because the estimated cut points are outside -1 and 1, then a strict
-criterion for the relative difference in amplitude is imposed to
-identify AEs considering only deviations of at most 10%."
+The relative difference in amplitude is then determined for these
+events, and parabolas are fitted to the histograms obtained for the
+relative difference data binned into intervals from -1 to 1 with a
+width 0.1 by fixing the vertex at the inner maximum of the histogram
+[...]. The width of the parabola is determined by minimizing the
+average squared distances between the parabola and the histogram data
+along arbitrary symmetric ranges from the inner maximum. Based on the
+fitted parabola, cut points with the `x`-axis are determined so that
+only those potential AEs whose relative difference is within these cut
+points are retained. If this automatic scheme does not succeed in
+determining suitable cut points, e.g., because the estimated cut
+points are outside the defined intervals, a strict criterion for the
+relative difference in amplitude is imposed to identify AEs
+considering only deviations of at most 10%."
 
 `estimate_AE()` estimates suitable settings for the amplitude based on
-the method developed in Greimel et al. (2022) for exact time matches.
+the method developed in Greimel et al. (2022) based on potential
+associated events identified using the specified time and metric
+deviations allowed for a match.
 
 It performs this procedure for two neighboring hydrographs, i.e., it
 takes a subset of `relation` and the two corresponding `Event` files
@@ -218,19 +229,18 @@ as input.  The gauging station `ID`s in the subset of `relation` and
 in the `Event` files must match.  Suitable settings for the amplitude
 are estimated as follows:
 
-- `Sy$Time` is shifted by the mean translation time between `Sx` and
-  `Sy`. 
+- `Sy$Time` is shifted by the optimal mean translation time between
+  `Sx` and `Sy`.
   
-- Based on the time, exact matches between `Sx` and `Sy`
-  are captured.
+- Based on the specified time lags, matches between `Sx` and `Sy` are
+  captured.
 
-- Relative difference in `AMP` are computed, e.g., `(Sy$AMP -
-  Sx$AMP) / Sx$AMP`.
+- Relative differences in `AMP` are computed, e.g., `(Sy$AMP - Sx$AMP)
+  / Sx$AMP`, and only matches are retained where these relative
+  differences are within the range specified.
   
-- Matched events detected at `Sy` with the amplitude most similar to
-  `Sx` are filtered. However, only matched events with an amplitude at
-  `Sy` of at most two times the amplitude at `Sx` are considered as
-  potential AEs.
+- Matched events are iteratively filtered to retain those where the
+  time lag is most similar leading to the potential AEs.
     
 - The relative differences of potential AEs are binned into intervals of 
   length 0.1 from -1 to 1. The created relative frequency table of the binned
@@ -376,7 +386,6 @@ The first list object refers to event type 2 (IC event).
 ```{r}
 res$`2`$settings
 ```
-
 The `settings` data frame contains the estimated time lag and metric
 settings computed with `estimate_AE()`. In this example with 4
 stations, it contains nine rows where three rows describe the relation
@@ -386,7 +395,6 @@ allowed, the `lag` values are 0 for `lower` and `upper` bound and 1 for `inner`.
 Events, where the relative difference in amplitude and the relative difference 
 in time are within these settings, are considered as "real" AE and therefore events
 caused by disruptive factors are excluded as far as possible.
-
 
 The following plot shows the histograms obtained for the relative
 differences in amplitude for each pair of neighboring gauging stations
@@ -399,7 +407,7 @@ these cut points are considered as "real" AEs.
 grid::grid.draw(res$`2`$plot_threshold)
 ```
 
-The "real" AEs can be insepcted using:
+The "real" AEs can be inspected using:
 
 ```{r}
 head(res$`2`$real_AE)

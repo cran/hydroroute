@@ -17,11 +17,11 @@ get_lag(
 )
 }
 \arguments{
-\item{Q}{Data frame (time series) of stage measurements which
-contains at least a column with the gauging station ID
+\item{Q}{Data frame (time series) of measurements which
+contains at least a column with the gauging station ID's
 (default: column index 1), a column with date-time values in
 character representation (default: column index 2) and a column
-with flow rates (default: column index 3).  If the column
+with flow measurements (default: column index 3).  If the column
 indices differ from \code{c(1, 2, 3)}, they have to be
 specified in the \code{cols} argument in the format \code{c(i,
 j, k)}.}
@@ -37,7 +37,7 @@ compatible format and fill missing time steps with \code{NA}.}
 
 \item{lag.max}{Numeric value that specifies the maximum lag at
 which to calculate the ccf in
-\code{\link[stats:ccf]{stats::ccf()}}.}
+\code{\link[stats:ccf]{stats::ccf()}} (default: \code{20}).}
 
 \item{na.action}{Function to be called to handle missing values in
 \code{\link[stats:ccf]{stats::ccf()}} (default:
@@ -66,7 +66,7 @@ A character vector which contains the estimated cumulative
     \code{HH:MM}.
 }
 \description{
-Given a data frame (time series) of stage measurements
+Given a data frame (time series) of measurements
     and a vector of gauging station ID's in order of their location
     in downstream direction, the lag (the amount of passing time
     between two gauging stations) is estimated based on the
@@ -81,7 +81,7 @@ Given a data frame (time series) of stage measurements
     differences are neglected.  If there are multiple time steps
     with the highest correlation, the smallest time step is
     considered. If the highest correlation corresponds to a zero
-    lag or positive lag (result should usually be negative as
+    lag or positive lag (note that the result should usually be negative as
     measurements at the lower gauge are later recorded as
     measurements at the upper gauge), a time step of length 1 is
     selected and a warning message is generated.

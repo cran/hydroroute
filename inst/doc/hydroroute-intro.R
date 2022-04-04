@@ -26,14 +26,18 @@ head(Sx)
 ## -----------------------------------------------------------------------------
 Q_file <- system.file("testdata", "Q.csv", package = "hydroroute")
 relation <- system.file("testdata", "relation.csv", package = "hydroroute")
-get_lag_file(Q_file, relation, inputsep = ",", format = "%Y-%m-%d %H:%M",
-             save = FALSE, overwrite = TRUE)
+(get_lag_file(Q_file, relation, inputsep = ",", format = "%Y-%m-%d %H:%M",
+              save = FALSE, overwrite = TRUE))
 
 ## -----------------------------------------------------------------------------
 Q_file <- system.file("testdata", "Q.csv", package = "hydroroute")
-relations_path <- system.file("testdata", package = "hydroroute")
-get_lag_dir(Q_file, relations_path, inputsep = ",",
-            inputdec = ".", format = "%Y-%m-%d %H:%M", overwrite = TRUE)
+relations_path <- file.path(tempdir(), "testdata")
+dir.create(relations_path)
+file.copy(list.files(system.file("testdata", package = "hydroroute"),
+                     full.name = TRUE),
+          relations_path, recursive = FALSE, copy.mode = TRUE)
+(get_lag_dir(Q_file, relations_path, inputsep = ",",
+             inputdec = ".", format = "%Y-%m-%d %H:%M", overwrite = TRUE))
 
 ## -----------------------------------------------------------------------------
 # file paths

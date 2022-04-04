@@ -1,6 +1,6 @@
 #' Get Lag
 #'
-#' @description Given a data frame (time series) of stage measurements
+#' @description Given a data frame (time series) of measurements
 #'     and a vector of gauging station ID's in order of their location
 #'     in downstream direction, the lag (the amount of passing time
 #'     between two gauging stations) is estimated based on the
@@ -15,16 +15,16 @@
 #'     differences are neglected.  If there are multiple time steps
 #'     with the highest correlation, the smallest time step is
 #'     considered. If the highest correlation corresponds to a zero
-#'     lag or positive lag (result should usually be negative as
+#'     lag or positive lag (note that the result should usually be negative as
 #'     measurements at the lower gauge are later recorded as
 #'     measurements at the upper gauge), a time step of length 1 is
 #'     selected and a warning message is generated.
 #'
-#' @param Q Data frame (time series) of stage measurements which
-#'     contains at least a column with the gauging station ID
+#' @param Q Data frame (time series) of measurements which
+#'     contains at least a column with the gauging station ID's
 #'     (default: column index 1), a column with date-time values in
 #'     character representation (default: column index 2) and a column
-#'     with flow rates (default: column index 3).  If the column
+#'     with flow measurements (default: column index 3).  If the column
 #'     indices differ from \code{c(1, 2, 3)}, they have to be
 #'     specified in the \code{cols} argument in the format \code{c(i,
 #'     j, k)}.
@@ -37,7 +37,7 @@
 #'     compatible format and fill missing time steps with \code{NA}.
 #' @param lag.max Numeric value that specifies the maximum lag at
 #'     which to calculate the ccf in
-#'     \code{\link[stats:ccf]{stats::ccf()}}.
+#'     \code{\link[stats:ccf]{stats::ccf()}} (default: \code{20}).
 #' @param na.action Function to be called to handle missing values in
 #'     \code{\link[stats:ccf]{stats::ccf()}} (default:
 #'     \code{na.pass}).
@@ -167,10 +167,10 @@ get_lag <- function(Q, relation, steplength = 15, lag.max = 20,
 #' Get Lag from Input File
 #'
 #' @description Given a file path it reads a data frame (time series)
-#'     of stage measurements which combines several ID's and calls
+#'     of measurements which combines several gauging station ID's and calls
 #'     \code{\link[=get_lag]{get_lag()}}. The relation (ID's) of
-#'     gauging stations is read from a file (provide file path). Make
-#'     sure that the file with \code{Q} data and the relation file
+#'     gauging stations is read from a file (provided through the file path).
+#'     The file with \code{Q} data and the relation file need to 
 #'     have the same separator (\code{inputsep}) and character for
 #'     decimal points (\code{inputdec}). Gauging station ID's have to
 #'     be in order of their location in downstream direction. The
@@ -180,9 +180,9 @@ get_lag <- function(Q, relation, steplength = 15, lag.max = 20,
 #' @param Q_file Data frame or character string. If it is a data
 #'     frame, it corresponds to the \code{Q} data frame in
 #'     \code{\link[=get_lag]{get_lag()}}.  It contains at least a
-#'     column with the gauging station ID (default: column index 1), a
+#'     column with the gauging station ID's (default: column index 1), a
 #'     column with date-time values in character representation
-#'     (default: column index 2) and a column with flow rates
+#'     (default: column index 2) and a column with flow measurements
 #'     (default: column index 3). If the column indices differ from
 #'     \code{c(1, 2, 3)}, they have to be specified as \code{cols}
 #'     argument in the format \code{c(i, j, k)}. If it is a character
@@ -202,7 +202,7 @@ get_lag <- function(Q, relation, steplength = 15, lag.max = 20,
 #'     \code{\link[hydropeak:flow]{hydropeak::flow()}} to get a
 #'     compatible format and fill missing time steps with \code{NA}.
 #' @param lag.max Maximum lag at which to calculate the ccf in
-#'     \code{\link[stats:ccf]{stats::ccf()}}.
+#'     \code{\link[stats:ccf]{stats::ccf()}} (default: \code{20}).
 #' @param na.action Function to be called to handle missing values in
 #'     \code{\link[stats:ccf]{stats::ccf()}} (default:
 #'     \code{na.pass}).
@@ -222,19 +222,19 @@ get_lag <- function(Q, relation, steplength = 15, lag.max = 20,
 #' @param save A logical. If \code{FALSE} (default) the lag, appended
 #'     to the relation file, is not written to a file, otherwise it is
 #'     written to \code{outfile}.
-#' @param outfile A character string naming a file path where the
+#' @param outfile A character string naming a file path and name where the
 #'     output file should be written to.
 #' @param mc.cores Number of cores to use with
 #'     \code{\link[parallel:mclapply]{parallel::mclapply()}}. On
-#'     Windows, this will be set to 1.
+#'     Windows, this is set to 1.
 #' @param overwrite A logical. If \code{FALSE} (default), it produces
 #'     an error if a \code{LAG} column already exists in the
 #'     \code{relation} file. Otherwise, it overwrites an existing
 #'     column.
 #'
-#' @return Returns invisible the data frame of the relation data with
+#' @return Returns invisibly the data frame of the relation data with
 #'     the estimated cumulative lag between neighboring gauging
-#'     stations' lag in the format \code{HH:MM} appended.
+#'     stations in the format \code{HH:MM} appended.
 #' @export
 #'
 #' @examples
@@ -294,7 +294,7 @@ get_lag_file <- function(Q_file, relation_file, steplength = 15, lag.max = 20,
 #' Get Lag from Input Directory
 #'
 #' @description Given a file path it reads a data frame (time series)
-#'     of stage measurements. For each \code{relation} file in the
+#'     of measurements. For each \code{relation} file in the
 #'     provided directory path it calls
 #'     \code{\link[=get_lag_file]{get_lag_file()}}.  Make sure that
 #'     the file with Q data and the relation files have the same
@@ -308,9 +308,9 @@ get_lag_file <- function(Q_file, relation_file, steplength = 15, lag.max = 20,
 #' @param Q Data frame or character string. If it is a data frame, it
 #'     corresponds to the \code{Q} data frame in
 #'     \code{\link[=get_lag]{get_lag()}}.  It contains at least a
-#'     column with the gauging station ID (default: column index 1), a
+#'     column with the gauging station ID's (default: column index 1), a
 #'     column with date-time values in character representation
-#'     (default: column index 2) and a column with flow rates
+#'     (default: column index 2) and a column with flow measurements
 #'     (default: column index 3). If the column indices differ from
 #'     \code{c(1, 2, 3)}, they have to be specified as \code{cols}
 #'     argument in the format \code{c(i, j, k)}. If it is a character
@@ -327,7 +327,7 @@ get_lag_file <- function(Q_file, relation_file, steplength = 15, lag.max = 20,
 #'     \code{\link[hydropeak:flow]{hydropeak::flow()}} to get a
 #'     compatible format and fill missing time steps with \code{NA}.
 #' @param lag.max Maximum lag at which to calculate the ccf in
-#'     \code{\link[stats:ccf]{stats::ccf()}}.
+#'     \code{\link[stats:ccf]{stats::ccf()}} (default: \code{20}).
 #' @param na.action Function to be called to handle missing values in
 #'     \code{\link[stats:ccf]{stats::ccf()}} (default:
 #'     \code{na.pass}).
@@ -352,15 +352,15 @@ get_lag_file <- function(Q_file, relation_file, steplength = 15, lag.max = 20,
 #'     input file.
 #' @param mc.cores Number of cores to use with
 #'     \code{\link[parallel:mclapply]{parallel::mclapply()}}. On
-#'     Windows, this will be set to 1.
+#'     Windows, this is set to 1.
 #' @param overwrite A logical. If \code{FALSE} (default), it produces
 #'     an error if a \code{LAG} column already exists in the
 #'     \code{relation} file. Otherwise, it overwrites an existing
 #'     column.
 #'
-#' @return Returns invisible a list of data frames where each list
+#' @return Returns invisibly a list of data frames where each list
 #'     element represents a \code{relation} file from the input
-#'     directory. Optionally, the data frames overwrite the existing
+#'     directory. Optionally, the data frames are used to overwrite the existing
 #'     \code{relation} files with the appended \code{LAG} column.
 #' @export
 #'
@@ -401,7 +401,7 @@ get_lag_dir <- function(Q, relation, steplength = 15, lag.max = 20,
                                                         steplength = steplength,
                                                         lag.max = lag.max,
                                                         na.action = na.action,
-                                                        mc.cores = mc.cores,
+                                                        mc.cores = 1,
                                                         tz = tz,
                                                         format = format,
                                                         cols = cols,

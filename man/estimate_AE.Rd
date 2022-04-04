@@ -10,66 +10,85 @@ estimate_AE(
   relation,
   timeLag = c(1, 1, 1),
   metricLag = c(1, 1),
+  unique = c("time", "metric"),
   TimeFormat = "\%Y-\%m-\%d \%H:\%M",
   tz = "Etc/GMT-1"
 )
 }
 \arguments{
-\item{Sx}{Data frame that consists of flow fluctuation events and computed
-metrics (see \code{\link[hydropeak:get_events]{hydropeak::get_events()}})
-of an upstream hydrograph \eqn{S_{x}}{S_x}.}
+\item{Sx}{Data frame that consists of flow fluctuation events and
+computed metrics (see
+\code{\link[hydropeak:get_events]{hydropeak::get_events()}}) of
+an upstream hydrograph \eqn{S_{x}}{S_x}.}
 
-\item{Sy}{Data frame that consists of flow fluctuation events and computed
-metrics (see \code{\link[hydropeak:get_events]{hydropeak::get_events()}})
-of a downstream hydrograph \eqn{S_{y}}{S_y}.}
+\item{Sy}{Data frame that consists of flow fluctuation events and
+computed metrics (see
+\code{\link[hydropeak:get_events]{hydropeak::get_events()}}) of
+a downstream hydrograph \eqn{S_{y}}{S_y}.}
 
-\item{relation}{Data frame that contains the relation between upstream and
-downstream hydrograph. Must only contain two rows (one for each hydrograph)
-in order of their location in downstream direction.
-See the appended example data \code{relation.csv} or vignette for details on
-the structure. See \code{\link[=get_lag]{get_lag()}} for further information
-about the relation and the lag between the hydrographs.}
+\item{relation}{Data frame that contains the relation between
+upstream and downstream hydrograph. Must only contain two rows
+(one for each hydrograph) in order of their location in
+downstream direction.  See the appended example data
+\code{relation.csv} or the vignette for details on the
+structure. See \code{\link[=get_lag]{get_lag()}} for further
+information about the relation and the lag between the
+hydrographs.}
 
-\item{timeLag}{Numeric vector specifying factors to alter the interval to capture
-events from the downstream hydrograph. By default it is
-\code{timeLag = c(1, 1, 1)}, this refers to matches within a time slot
-\eqn{\pm} the mean translation time from \code{relation}. For exact time
-matches, \code{timeLag = c(0, 1, 0)} must be specified.}
+\item{timeLag}{Numeric vector specifying factors to alter the
+interval to capture events from the downstream hydrograph. By
+default it is \code{timeLag = c(1, 1, 1)}, this refers to
+matches within a time slot \eqn{\pm} the mean translation time
+from \code{relation}. For exact time matches, \code{timeLag =
+c(0, 1, 0)} must be specified.}
 
-\item{metricLag}{Numeric vector specifying factor to alter the interval to capture
-events from the downstream hydrograph. By default it is
-\code{metricLag = c(1, 1)}, such that events are filtered where the amplitude
-at \eqn{S_{y}}{S_y} is at least 0, i.e. amplitude at
-\eqn{S_{x} - 1 \cdot} amplitude at \eqn{S_{x}}{S_x}, and at most two times the
-amplitude at \eqn{S_{x}}{S_x}, i.e. \eqn{S_{x} + 1 \cdot} amplitude at \eqn{S_{x}}{S_x}.
-For exact matches, \code{metricLag = c(0, 0)} must be specified.}
+\item{metricLag}{Numeric vector specifying factors to alter the
+interval of relative metric deviations to capture events from
+the downstream hydrograph. By default. it is \code{metricLag =
+c(1, 1)}, such that events are filtered where the amplitude at
+\eqn{S_{y}}{S_y} is at least 0, i.e., amplitude at \eqn{S_{x} -
+1 \cdot} amplitude at \eqn{S_{x}}{S_x}, and at most two times
+the amplitude at \eqn{S_{x}}{S_x}, i.e., \eqn{S_{x} + 1 \cdot}
+amplitude at \eqn{S_{x}}{S_x}.  For exact matches,
+\code{metricLag = c(0, 0)} must be specified.}
 
-\item{TimeFormat}{Character string giving the date-time format of the
-date-time column in the input data frame  (default: "\%Y-\%m-\%d \%H:\%M").}
+\item{unique}{Character string specifying if the potential AEs which
+meet the \code{timeLag} and \code{metricLag} condition should
+be filtered to contain only unique events using \code{"time"},
+i.e., by selecting those where the time difference is smallest
+compared to the specified factor of the mean translation time, or using
+\code{"metric"}, i.e., by selecting those where the relative
+difference in amplitude is smallest (default: \code{"time"}).}
 
-\item{tz}{Character string specifying the time zone to be used for the
-conversion (default: "Etc/GMT-1").}
+\item{TimeFormat}{Character string giving the date-time format of
+the date-time column in the input data frame (default:
+"\%Y-\%m-\%d \%H:\%M").}
+
+\item{tz}{Character string specifying the time zone to be used for
+the conversion (default: "Etc/GMT-1").}
 }
 \value{
-A nested list containing the estimated settings, the histogram obtained
-   for the relative difference data with estimated cut points, and the obtained
-   real AEs.
+A nested list containing the estimated settings, the
+    histogram obtained for the relative difference data with
+    estimated cut points, and the obtained \dQuote{real} AEs.
 }
 \description{
-For two neighboring stations, potential associated events (AEs)
-    are determined where the time lag between two events equals the mean
-    translation time between these two stations. For all potential AEs,
-    parabolas are fitted to the histogram obtained for the relative difference
-    in amplitude binned into intervals from -1 to 1 of width 0.1 by fixing the
-    vertex at the inner maximum of the histogram and the width is determined
-    by minimizing the average squared distances between the parabola and the
-    histogram data along arbitrary symmetric ranges from the inner maximum.
-    Based on the fitted parabola cut points with the x-axis are determined
-    such that only those potentially AEs are retained where the relative
-    difference is within these cut points. If this automatic scheme does not
-    succeed to determine suitable cut points, e.g., because the estimated cut
-    points are outside -1 and 1, then a strict criterion for the relative
-    difference in amplitude is imposed to identify AEs considering only
+For two neighboring stations, potential associated
+    events (AEs) are determined according to the time lag and
+    metric (amplitude) difference allowed. For all potential AEs,
+    parabolas are fitted to the histogram obtained for the relative
+    difference in amplitude binned into intervals from -1 to 1 of
+    width 0.1 by fixing the vertex at the inner maximum of the
+    histogram and the width is determined by minimizing the average
+    squared distances between the parabola and the histogram data
+    along arbitrary symmetric ranges from the inner maximum.  Based
+    on the fitted parabola, cut points with the x-axis are
+    determined such that only those potential AEs are retained
+    where the relative difference is within these cut points. If
+    this automatic scheme does not succeed to determine suitable
+    cut points, e.g., because the estimated cut points are outside
+    -1 and 1, then a strict criterion for the relative difference
+    in amplitude is imposed to identify AEs considering only
     deviations of at most 10\%.
 }
 \examples{

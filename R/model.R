@@ -1,6 +1,6 @@
 #' Fitting Models
 #' @description Fit the specified models for all metrics available in the data set
-#'     provided. 
+#'     provided.
 #' @param formula An object of class \code{\link[stats:formula]{stats::formula()}}
 #'     to fit models.
 #' @param data A data frame in a format as available in the first list element from
@@ -143,18 +143,19 @@ get_predictions <- function(models, initials) {
                                        metric = initials_subset$metric[j],
                                        prediction = initials_subset$value[j],
                                        name = initials_subset$name[j])
-      k <- 1        
-      while (k <= nrow(models)) {
-        if (models[[k, 2]] != initials_subset$station[j]) {
-          prev <- unname(subset(initials_subset, subset = name == initials_subset$name[j],
-                                select = "value"))
-          prev <- stats::predict(models[[k, (i + 2)]], newdata = data.frame(x = prev))
-          results_model[[k + 1]] <- data.frame(station = models[[k, 2]], # station.y
-                                               metric = initials_subset$metric[j],
-                                               prediction = prev,
-                                               name = initials_subset$name[j])
-        }
-        k <- k + 1
+
+      prev <- unname(subset(initials_subset,
+                            subset = name == initials_subset$name[j],
+                            select = "value"))
+      index <- which(unlist(models[, 1]) == initials_subset$station[j])
+      for (k in seq_len(nrow(models))) {
+        prev <- stats::predict(models[[index, tolower(metrics[i])]], newdata = data.frame(x = prev))
+        results_model[[k+1]] <- data.frame(station = models[[index, 2]], # station.y
+                                           metric = initials_subset$metric[j],
+                                           prediction = prev,
+                                           name = initials_subset$name[j])
+        index <- which(unlist(models[, 1]) == models[index, 2][[1]])
+        if (length(index) == 0) break
       }
       results_name[[j]] <- do.call("rbind", results_model)
     }
@@ -168,7 +169,7 @@ get_predictions <- function(models, initials) {
 }
 
 #' Impute Missing Initial Values
-#' @description Determine initial values in a data-driven way if missing. 
+#' @description Determine initial values in a data-driven way if missing.
 #' @param real_AE Data frame containing identified \dQuote{real} AEs. Output from
 #'     \code{\link[=estimate_AE]{estimate_AE()}}.
 #' @param initials A data frame which contains initial values for predictions
@@ -176,7 +177,8 @@ get_predictions <- function(models, initials) {
 #' @param method A function that is used to impute missing values based on data
 #'     \code{real_AE}.
 #' @return A data frame that corresponds to the \code{initials} input data frame
-#'     with no missing values.
+#'     with no missing values. If \code{real_AE} is an empty data frame, the
+#'     input initials file is returned.
 #' @keywords internal
 #' @noRd
 impute_initials <- function(real_AE, initials, method = base::max) {
@@ -184,22 +186,23 @@ impute_initials <- function(real_AE, initials, method = base::max) {
   colnames(real_AE) <- tolower(colnames(real_AE))
   initials$metric <- tolower(initials$metric)
 
-  real_AE_long <- real_AE[, !(names(real_AE) %in% "diff_metric")]
-  real_AE_long <- reshape(real_AE_long)
+  if (nrow(real_AE) > 0) {
+    real_AE_long <- real_AE[, !(names(real_AE) %in% "diff_metric")]
+    real_AE_long <- reshape(real_AE_long)
 
-  for (i in which(is.na(initials$value))) {
-    STATION <- as.character(initials[i, "station"])
-    METRIC <- as.character(initials[i, "metric"])
+    for (i in which(is.na(initials$value))) {
+      STATION <- as.character(initials[i, "station"])
+      METRIC <- as.character(initials[i, "metric"])
 
-    # impute from Sx or Sy
-    if (unique(real_AE_long$station.x == STATION)) {
-      initials[i, "value"] <- method(subset(real_AE_long, metric == METRIC)$x)
+      # impute from Sx or Sy
+      if (unique(real_AE_long$station.x == STATION)) {
+        initials[i, "value"] <- method(subset(real_AE_long, metric == METRIC)$x)
 
-    } else if (unique(real_AE_long$station.y == STATION)) {
-      initials[i, "value"] <- method(subset(real_AE_long, metric == METRIC)$y)
+      } else if (unique(real_AE_long$station.y == STATION)) {
+        initials[i, "value"] <- method(subset(real_AE_long, metric == METRIC)$y)
+      }
     }
+    initials$metric <- toupper(initials$metric)
   }
-  initials$metric <- toupper(initials$metric)
-
   initials
 }

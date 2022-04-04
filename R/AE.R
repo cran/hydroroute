@@ -38,6 +38,13 @@ utils::globalVariables(c("metric", "station.x", "time.x", "station.y", "time.y",
 #'     \eqn{S_{x} - 1 \cdot} amplitude at \eqn{S_{x}}{S_x}, and at most two times the
 #'     amplitude at \eqn{S_{x}}{S_x}, i.e., \eqn{S_{x} + 1 \cdot} amplitude at \eqn{S_{x}}{S_x}.
 #'     For exact matches, \code{metricLag = c(0, 0)} must be specified.
+#' @param unique Character string specifying if the potential AEs which
+#'     meet the \code{timeLag} and \code{metricLag} condition should
+#'     be filtered to contain only unique events using \code{"time"},
+#'     i.e., by selecting those where the time difference is smallest
+#'     compared to the specified factor of the mean translation time, or using
+#'     \code{"metric"}, i.e., by selecting those where the relative
+#'     difference in amplitude is smallest (default: \code{"time"}).
 #' @param TimeFormat Character string giving the date-time format of the
 #'     date-time column in the input data frame  (default: "\%Y-\%m-\%d \%H:\%M").
 #' @param tz Character string specifying the time zone to be used for the
@@ -48,11 +55,15 @@ utils::globalVariables(c("metric", "station.x", "time.x", "station.y", "time.y",
 #'     hydrograph \eqn{S_{y}}{S_y} for each metric (long format). Columns \code{x}
 #'     and \code{y} contain the values of the metrics (column \code{Metric}) for
 #'     upstream (\code{x}) and downstream (\code{y}) hydrograph. \code{diff_metric}
-#'     is the computed metric deviation.
+#'     is the computed metric deviation. If no potential AEs are found, \code{NULL}
+#'     is returned.
 #' @keywords internal
 #' @noRd
 potential_AE <- function(Sx, Sy, relation, timeLag = c(1, 1, 1), metricLag = c(1, 1),
+                         unique = c("time", "metric"),
                          TimeFormat = "%Y-%m-%d %H:%M", tz = "Etc/GMT-1") {
+
+  unique <- match.arg(unique)
 
   colnames(relation) <- tolower(colnames(relation))
   colnames(Sx) <- tolower(colnames(Sx))
@@ -69,47 +80,84 @@ potential_AE <- function(Sx, Sy, relation, timeLag = c(1, 1, 1), metricLag = c(1
     Sy$station <- rep(relation$station[2], nrow(Sy))
   }
 
+  # lag_opt
+  lag <- ifelse(is.na(relation$lag), "00:00", as.character(relation$lag))
+  lag_opt <- diff(as.difftime(lag, format = "%H:%M", units = "mins")) *
+    timeLag[2]
+
   # get all events with time matches
   events <- merge_time(Sx, Sy, relation, timeLag, TimeFormat, tz)
 
-  # for each event at Sx, filter event at Sy with smallest time difference
-  events <- events |>
-    dplyr::group_by(time.x) |>
-    dplyr::slice(which.min(abs(time.x - time.y)))
+  potential_AE <- NULL
+  if (!is.null(events)) {
+    # reshape to long format
+    events_long <- reshape(events)
 
-  # reshape to long format
-  events_long <- reshape(events)
+    # filter metric, relative difference in metric
+    potential_AE <- events_long |>
+      dplyr::filter(metric == "amp") |>
+      dplyr::mutate(diff_metric = (y - x) / x)
 
-  # relative difference in metric and time, filter metric
-  potential_AE <- events_long |>
-    dplyr::filter(metric == "amp") |>
-    dplyr::mutate(diff_metric = (y - x) / x)
+    # potential AEs: event detected at Sy with metric within metricLag range
+    potential_AE <- potential_AE |>
+      dplyr::filter(y >= (x - metricLag[1] * x), y <= (x + metricLag[2] * x))
 
-  # potential AEs: event detected at Sy with metric most similar to Sx
-  # filter
-  potential_AE <- potential_AE |>
-    dplyr::filter(y >= (x - metricLag[1] * x), y <= (x + metricLag[2] * x))
+    if (nrow(potential_AE) > 0) {
+      unique_AE <- NULL
+      # for each event at Sx, filter event at Sy with smallest time / AMP difference
+      while (nrow(potential_AE) > 0) {
+        if (unique == "time") {
+          best <- potential_AE |>
+            dplyr::group_by(time.x) |>
+            dplyr::slice(which.min(abs(time.x - time.y + lag_opt))) |>
+            dplyr::group_by(time.y) |>
+            dplyr::slice(which.min(abs(time.x - time.y + lag_opt))) |>
+            dplyr::ungroup()
+        } else {
+          best <- potential_AE |>
+            dplyr::group_by(time.x) |>
+            dplyr::slice(which.min(abs(y - x))) |>
+            dplyr::group_by(time.y) |>
+            dplyr::slice(which.min(abs(y - x))) |>
+            dplyr::ungroup()
+        }
 
+        potential_AE <- potential_AE |>
+          dplyr::anti_join(best |> dplyr::select(time.x),
+                           by = "time.x") |>
+          dplyr::anti_join(best |> dplyr::select(time.y),
+                           by = "time.y")
+        unique_AE <- rbind(unique_AE, best)
+      }
 
-  # all potential AEs incl. all metrics
-  potential_AE <- events_long |>
-    dplyr::inner_join(potential_AE |> dplyr::select(station.x, time.x, station.y,
-                                               time.y, diff_metric),
-                      by = c("station.x", "time.x", "station.y", "time.y"))
+      # all potential AEs incl. all metrics
+      potential_AE <- events_long |>
+        dplyr::inner_join(unique_AE |> dplyr::select(station.x, time.x, station.y,
+                                                     time.y, diff_metric),
+                          by = c("station.x", "time.x", "station.y", "time.y"))
 
-  # update diff_metric for all metrics
-  potential_AE <-  potential_AE |>
-    dplyr::mutate(diff_metric = (y - x) / x)
+      # update diff_metric for all metrics
+      potential_AE <-  potential_AE |>
+        dplyr::mutate(diff_metric = (y - x) / x)
+    } else {
+      potential_AE <- NULL
+    }
+  }
 
   potential_AE
 }
 
 #' Merge Events
-#' @description Given two event data frames of neighboring stations \eqn{S_{x}}{S_x}
-#'     and \eqn{S_{y}}{S_y} that consist of flow fluctuation events and computed
-#'     metrics (see \code{\link[hydropeak:get_events]{hydropeak::get_events()}}),
-#'     the translation time between these two stations is subtracted from \eqn{S_{y}}{S_y}
-#'     and events are merged where exact matches can be found.
+#'
+#' @description Given two event data frames of neighboring stations
+#'     \eqn{S_{x}}{S_x} and \eqn{S_{y}}{S_y} that consist of flow
+#'     fluctuation events and computed metrics (see
+#'     \code{\link[hydropeak:get_events]{hydropeak::get_events()}}),
+#'     the translation time indicated by the relation file as well as
+#'     \code{timeLag} between these two stations is subtracted from
+#'     \eqn{S_{y}}{S_y} and events are merged where matches according
+#'     to differences allowed to \code{timeLag} can be found.
+#'
 #' @param Sx Data frame that consists of flow fluctuation events and computed
 #'     metrics (see \code{\link[hydropeak:get_events]{hydropeak::get_events()}})
 #'     of an upstream hydrograph \eqn{S_{x}}{S_x}.
@@ -133,7 +181,8 @@ potential_AE <- function(Sx, Sy, relation, timeLag = c(1, 1, 1), metricLag = c(1
 #'     conversion (default: "Etc/GMT-1").
 #'
 #' @return Data frame that has a matched event at \eqn{S_{x}}{S_x} and
-#'     \eqn{S_{y}}{S_y} in each row.
+#'     \eqn{S_{y}}{S_y} in each row. If no matches are detected,
+#'     \code{NULL} is returned.
 #' @importFrom lubridate %within%
 #' @export
 #' @examples
@@ -177,7 +226,7 @@ merge_time <- function(Sx, Sy, relation, timeLag = c(1, 1, 1),
   # RATIO does not make sense for S1 if not type 'Gauge'
   if ("S1" %in% relation$station) {
     Sx$ratio <- ifelse(Sx$station == "S1" &
-                         subset(relation, station == "S1")$type != "Gauge",
+                       subset(relation, station == "S1")$type != "Gauge",
                        NA_real_, Sx$ratio)
   }
 
@@ -206,29 +255,31 @@ merge_time <- function(Sx, Sy, relation, timeLag = c(1, 1, 1),
   index_df <- data.frame(x = rep(seq(length(index_list)), lengths(index_list)),
                          y = unlist(index_list))
 
-  index_split <- index_df |>
-    dplyr::group_by(x)
+  events <- NULL
+  if (nrow(index_df) > 0) {
+    index_split <- index_df |>
+      dplyr::group_by(x)
 
-  index_group_split <- dplyr::group_split(index_split)
+    index_group_split <- dplyr::group_split(index_split)
 
-  index_df_match <- do.call(rbind, index_group_split)
+    index_df_match <- do.call(rbind, index_group_split)
 
-  Sx_new <- Sx[index_df_match$x, ]
-  Sy_new <- Sy[index_df_match$y, ]
+    Sx_new <- Sx[index_df_match$x, ]
+    Sy_new <- Sy[index_df_match$y, ]
 
-  # helper variable for merging
-  Sx_new$help <- seq.int(1, nrow(Sx_new))
-  Sy_new$help <- seq.int(1, nrow(Sy_new))
+    # helper variable for merging
+    Sx_new$help <- seq.int(1, nrow(Sx_new))
+    Sy_new$help <- seq.int(1, nrow(Sy_new))
 
-  events <- merge(Sx_new, Sy_new, by = "help")
+    events <- merge(Sx_new, Sy_new, by = "help")
 
-  # drop helper variable
-  events <- events[ , !(names(events) %in% "help")]
+    # drop helper variable
+    events <- events[ , !(names(events) %in% "help")]
 
-  # shift back
-  events$time.y <- shift_time(datetime = events$time.y, shift = -lag_opt,
-                                    TimeFormat = TimeFormat, tz = tz)
-
+    # shift back
+    events$time.y <- shift_time(datetime = events$time.y, shift = -lag_opt,
+                                TimeFormat = TimeFormat, tz = tz)
+  }
   events
 }
 
@@ -269,7 +320,7 @@ shift_time <- function(datetime, shift, TimeFormat = "%Y-%m-%d %H:%M",
 
 #' Write Objects to csv
 #' @description Writes the provided data frame or matrix to a csv file
-#'     with path and file name as specified. 
+#'     with path and file name as specified.
 #' @param x Matrix or data frame containing the estimated settings or real AEs
 #'     from \code{\link[=estimate_AE]{estimate_AE()}}.
 #' @param outdir Character string naming a directory where the generated plot
@@ -352,53 +403,70 @@ get_bounds <- function(pars) {
 
 
 #' Estimate Associated Events
-#' @description For two neighboring stations, potential associated events (AEs)
-#'     are determined where the time lag between two events equals the mean
-#'     translation time between these two stations. For all potential AEs,
-#'     parabolas are fitted to the histogram obtained for the relative difference
-#'     in amplitude binned into intervals from -1 to 1 of width 0.1 by fixing the
-#'     vertex at the inner maximum of the histogram and the width is determined
-#'     by minimizing the average squared distances between the parabola and the
-#'     histogram data along arbitrary symmetric ranges from the inner maximum.
-#'     Based on the fitted parabola cut points with the x-axis are determined
-#'     such that only those potentially AEs are retained where the relative
-#'     difference is within these cut points. If this automatic scheme does not
-#'     succeed to determine suitable cut points, e.g., because the estimated cut
-#'     points are outside -1 and 1, then a strict criterion for the relative
-#'     difference in amplitude is imposed to identify AEs considering only
+#' @description For two neighboring stations, potential associated
+#'     events (AEs) are determined according to the time lag and
+#'     metric (amplitude) difference allowed. For all potential AEs,
+#'     parabolas are fitted to the histogram obtained for the relative
+#'     difference in amplitude binned into intervals from -1 to 1 of
+#'     width 0.1 by fixing the vertex at the inner maximum of the
+#'     histogram and the width is determined by minimizing the average
+#'     squared distances between the parabola and the histogram data
+#'     along arbitrary symmetric ranges from the inner maximum.  Based
+#'     on the fitted parabola, cut points with the x-axis are
+#'     determined such that only those potential AEs are retained
+#'     where the relative difference is within these cut points. If
+#'     this automatic scheme does not succeed to determine suitable
+#'     cut points, e.g., because the estimated cut points are outside
+#'     -1 and 1, then a strict criterion for the relative difference
+#'     in amplitude is imposed to identify AEs considering only
 #'     deviations of at most 10\%.
-#' @param Sx Data frame that consists of flow fluctuation events and computed
-#'     metrics (see \code{\link[hydropeak:get_events]{hydropeak::get_events()}})
-#'     of an upstream hydrograph \eqn{S_{x}}{S_x}.
-#' @param Sy Data frame that consists of flow fluctuation events and computed
-#'     metrics (see \code{\link[hydropeak:get_events]{hydropeak::get_events()}})
-#'     of a downstream hydrograph \eqn{S_{y}}{S_y}.
-#' @param relation Data frame that contains the relation between upstream and
-#'     downstream hydrograph. Must only contain two rows (one for each hydrograph)
-#'     in order of their location in downstream direction.
-#'     See the appended example data \code{relation.csv} or vignette for details on
-#'     the structure. See \code{\link[=get_lag]{get_lag()}} for further information
-#'     about the relation and the lag between the hydrographs.
-#' @param timeLag Numeric vector specifying factors to alter the interval to capture
-#'     events from the downstream hydrograph. By default it is
-#'     \code{timeLag = c(1, 1, 1)}, this refers to matches within a time slot
-#'     \eqn{\pm} the mean translation time from \code{relation}. For exact time
-#'     matches, \code{timeLag = c(0, 1, 0)} must be specified.
-#' @param metricLag Numeric vector specifying factor to alter the interval to capture
-#'     events from the downstream hydrograph. By default it is
-#'     \code{metricLag = c(1, 1)}, such that events are filtered where the amplitude
-#'     at \eqn{S_{y}}{S_y} is at least 0, i.e. amplitude at
-#'     \eqn{S_{x} - 1 \cdot} amplitude at \eqn{S_{x}}{S_x}, and at most two times the
-#'     amplitude at \eqn{S_{x}}{S_x}, i.e. \eqn{S_{x} + 1 \cdot} amplitude at \eqn{S_{x}}{S_x}.
-#'     For exact matches, \code{metricLag = c(0, 0)} must be specified.
-#' @param TimeFormat Character string giving the date-time format of the
-#'     date-time column in the input data frame  (default: "\%Y-\%m-\%d \%H:\%M").
-#' @param tz Character string specifying the time zone to be used for the
-#'     conversion (default: "Etc/GMT-1").
+#' @param Sx Data frame that consists of flow fluctuation events and
+#'     computed metrics (see
+#'     \code{\link[hydropeak:get_events]{hydropeak::get_events()}}) of
+#'     an upstream hydrograph \eqn{S_{x}}{S_x}.
+#' @param Sy Data frame that consists of flow fluctuation events and
+#'     computed metrics (see
+#'     \code{\link[hydropeak:get_events]{hydropeak::get_events()}}) of
+#'     a downstream hydrograph \eqn{S_{y}}{S_y}.
+#' @param relation Data frame that contains the relation between
+#'     upstream and downstream hydrograph. Must only contain two rows
+#'     (one for each hydrograph) in order of their location in
+#'     downstream direction.  See the appended example data
+#'     \code{relation.csv} or the vignette for details on the
+#'     structure. See \code{\link[=get_lag]{get_lag()}} for further
+#'     information about the relation and the lag between the
+#'     hydrographs.
+#' @param timeLag Numeric vector specifying factors to alter the
+#'     interval to capture events from the downstream hydrograph. By
+#'     default it is \code{timeLag = c(1, 1, 1)}, this refers to
+#'     matches within a time slot \eqn{\pm} the mean translation time
+#'     from \code{relation}. For exact time matches, \code{timeLag =
+#'     c(0, 1, 0)} must be specified.
+#' @param metricLag Numeric vector specifying factors to alter the
+#'     interval of relative metric deviations to capture events from
+#'     the downstream hydrograph. By default. it is \code{metricLag =
+#'     c(1, 1)}, such that events are filtered where the amplitude at
+#'     \eqn{S_{y}}{S_y} is at least 0, i.e., amplitude at \eqn{S_{x} -
+#'     1 \cdot} amplitude at \eqn{S_{x}}{S_x}, and at most two times
+#'     the amplitude at \eqn{S_{x}}{S_x}, i.e., \eqn{S_{x} + 1 \cdot}
+#'     amplitude at \eqn{S_{x}}{S_x}.  For exact matches,
+#'     \code{metricLag = c(0, 0)} must be specified.
+#' @param unique Character string specifying if the potential AEs which
+#'     meet the \code{timeLag} and \code{metricLag} condition should
+#'     be filtered to contain only unique events using \code{"time"},
+#'     i.e., by selecting those where the time difference is smallest
+#'     compared to the specified factor of the mean translation time, or using
+#'     \code{"metric"}, i.e., by selecting those where the relative
+#'     difference in amplitude is smallest (default: \code{"time"}).
+#' @param TimeFormat Character string giving the date-time format of
+#'     the date-time column in the input data frame (default:
+#'     "\%Y-\%m-\%d \%H:\%M").
+#' @param tz Character string specifying the time zone to be used for
+#'     the conversion (default: "Etc/GMT-1").
 #'
-#' @return A nested list containing the estimated settings, the histogram obtained
-#'    for the relative difference data with estimated cut points, and the obtained
-#'    real AEs.
+#' @return A nested list containing the estimated settings, the
+#'     histogram obtained for the relative difference data with
+#'     estimated cut points, and the obtained \dQuote{real} AEs.
 #' @export
 #'
 #' @examples
@@ -421,7 +489,10 @@ get_bounds <- function(pars) {
 #' results$plot_threshold
 #' results$real_AE
 estimate_AE <- function(Sx, Sy, relation, timeLag = c(1, 1, 1), metricLag = c(1, 1),
+                        unique = c("time", "metric"),
                         TimeFormat = "%Y-%m-%d %H:%M", tz = "Etc/GMT-1") {
+  unique <- match.arg(unique)
+
   colnames(relation) <- tolower(colnames(relation))
   colnames(Sx) <- tolower(colnames(Sx))
   colnames(Sy) <- tolower(colnames(Sy))
@@ -452,46 +523,51 @@ estimate_AE <- function(Sx, Sy, relation, timeLag = c(1, 1, 1), metricLag = c(1,
   # potential AE, AMP within fixed interval
   potential_AE <- potential_AE(Sx = Sx, Sy = Sy, relation = relation,
                                timeLag = timeLag, metricLag = metricLag,
-                               TimeFormat = TimeFormat, tz = tz)
+                               unique = unique, TimeFormat = TimeFormat, tz = tz)
+  settings <- NULL
+  plot_threshold <- NULL
+  real_AE <- NULL
 
-  # estimate cut points
-  potential_AE_subset <- potential_AE |>
-    dplyr::filter(metric == "amp")
+  if (!is.null(potential_AE)) {
+    # estimate cut points
+    potential_AE_subset <- potential_AE |>
+      dplyr::filter(metric == "amp")
 
-  # relative difference data binned into intervals from -1 to 1 of width 0.1
-  freq_dist <- table(cut(potential_AE_subset$diff_metric, seq(-1, 1, by = 0.1)))
-  prop_dist <- freq_dist / sum(freq_dist)
+    # relative difference data binned into intervals from -1 to 1 of width 0.1
+    freq_dist <- table(cut(potential_AE_subset$diff_metric, seq(-1, 1, by = 0.1)))
+    prop_dist <- freq_dist / sum(freq_dist)
 
-  pars <- get_parabola(prop_dist)
+    pars <- get_parabola(prop_dist)
 
-  # cut points (or strict criterion)
-  bounds <- get_bounds(pars)
+    # cut points (or strict criterion)
+    bounds <- get_bounds(pars)
 
-  # fitted cut points -> relative difference
-  metric_est <- bounds + 1
+    # fitted cut points -> relative difference
+    metric_est <- bounds + 1
 
-  # estimated settings
-  settings <- cbind.data.frame(station.x = rep(potential_AE$station.x[1], 3),
-                               station.y = rep(potential_AE$station.y[1], 3),
-                               bound = c("lower", "inner", "upper"),
-                               lag = timeLag,
-                               metric = c(metric_est[1], mean(metric_est), metric_est[2]))
+    # estimated settings
+    settings <- cbind.data.frame(station.x = rep(potential_AE$station.x[1], 3),
+                                 station.y = rep(potential_AE$station.y[1], 3),
+                                 bound = c("lower", "inner", "upper"),
+                                 lag = timeLag,
+                                 metric = c(metric_est[1], mean(metric_est), metric_est[2]))
 
-  # real AEs
-  # filter events within estimated cut points (settings)
-  events <- events |>
-    dplyr::inner_join(potential_AE_subset |> dplyr::select(station.x, time.x, station.y,
-                                                 time.y, diff_metric),
-                      by = c("station.x", "time.x", "station.y", "time.y"))
+    # real AEs
+    # filter events within estimated cut points (settings)
+    events <- events |>
+      dplyr::inner_join(potential_AE_subset |> dplyr::select(station.x, time.x, station.y,
+                                                             time.y, diff_metric),
+                        by = c("station.x", "time.x", "station.y", "time.y"))
 
-  real_AE <- events |>
-    dplyr::filter(dplyr::between(diff_metric + 1, settings$metric[1],
-                                 settings$metric[3]))
+    real_AE <- events |>
+      dplyr::filter(dplyr::between(diff_metric + 1, settings$metric[1],
+                                   settings$metric[3]))
 
-  # threshold plot
-  plot_threshold <- plot_threshold(freq_dist, pars, bounds,
+    # threshold plot
+    plot_threshold <- plot_threshold(freq_dist, pars, bounds,
                                      unique(potential_AE$station.x),
                                      unique(potential_AE$station.y))
+  }
 
   return(list(settings = settings, plot_threshold = plot_threshold,
               real_AE = real_AE))
@@ -505,14 +581,14 @@ estimate_AE <- function(Sx, Sy, relation, timeLag = c(1, 1, 1), metricLag = c(1,
 #'     \code{event_type}. It fits models to describe translation and retention
 #'     processes between neighboring hydrographs, and generates plots
 #'     (see vignette for details). Given a file with initial values (see vignette),
-#'     predictions a made and visualized in a plot.
+#'     predictions are made and visualized in a plot.
 #'     Optionally, the results can be written to a directory.
-#'     Make sure that all files have the same separator (\code{inputsep}) and
+#'     All files need to have the same separator (\code{inputsep}) and
 #'     character for decimal points (\code{inputdec}).
-#' @param relation_path Character string containing the path of the file which
+#' @param relation_path Character string containing the path of the file where
 #'     the relation file is to be read from with
 #'     \code{\link[utils:read.csv]{utils::read.csv()}}. The file must contain a
-#'     column \code{ID} that contains the gauging station ID's in the file have to be
+#'     column \code{ID} that contains the gauging station ID. ID's in the file have to be
 #'     in order of their location in downstream direction.
 #' @param events_path Character string containing the path of the directory
 #'     where the event files corresponding to the `relation' file are located. Only
@@ -520,15 +596,22 @@ estimate_AE <- function(Sx, Sy, relation, timeLag = c(1, 1, 1), metricLag = c(1,
 #'     the `relation' file.
 #' @param initial_values_path Character string containing the path of the file
 #'     which contains initial values for predictions (see vignette).
+#' @param unique Character string specifying if the potential AEs which
+#'     meet the \code{timeLag} and \code{metricLag} condition should
+#'     be filtered to contain only unique events using \code{"time"},
+#'     i.e., by selecting those where the time difference is smallest
+#'     compared to the specified factor of the mean translation time, or using
+#'     \code{"metric"}, i.e., by selecting those where the relative
+#'     difference in amplitude is smallest (default: \code{"time"}).
 #' @param inputdec Character string for decimal points in input data.
 #' @param inputsep Field separator character string for input data.
 #' @param event_type Vector specifying the event type that is used to identify
 #'     event files by their file names
 #'     (see \code{\link[hydropeak:get_events]{hydropeak::get_events()}}).
 #'     Default: \code{c(2, 4)}, i.e., increasing and decreasing events.
-#' @param saveResults A logical. If \code{FALSE} (default), the generated plot
+#' @param saveResults A logical. If \code{FALSE} (default), the generated plots
 #'     and the estimated settings are not saved. Otherwise the settings are written
-#'     to a csv file and the plot are saved as png.
+#'     to a csv file and the plots are saved as png and pdf files.
 #' @param outdir Character string naming a directory where the estimated
 #'     settings should be saved to.
 #' @param TimeFormat Character string giving the date-time format of the
@@ -562,6 +645,7 @@ estimate_AE <- function(Sx, Sy, relation, timeLag = c(1, 1, 1), metricLag = c(1,
 #'     values based on the \dQuote{initial values}.
 #' @export
 peaktrace  <- function(relation_path, events_path, initial_values_path,
+                       unique = c("time", "metric"),
                        inputdec = ".", inputsep = ",", event_type = c(2, 4),
                        saveResults = FALSE, outdir = tempdir(),
                        TimeFormat = "%Y-%m-%d %H:%M", tz = "Etc/GMT-1",
@@ -570,8 +654,10 @@ peaktrace  <- function(relation_path, events_path, initial_values_path,
   old <- options(scipen = 999)
   on.exit(options(old))
 
-  # exact time matches
-  timeLag <- c(0, 1, 0)
+  unique <- match.arg(unique)
+
+  # time matches plus/minus lag
+  timeLag <- c(1, 1, 1)
 
   stopifnot(is.character(relation_path) & length(relation_path) == 1)
   stopifnot(is.character(events_path) & length(events_path) == 1)
@@ -608,14 +694,16 @@ peaktrace  <- function(relation_path, events_path, initial_values_path,
 
   stopifnot(length(events_files) == length(events_list))
 
-  # empty lists
-  plot_list_threshold <- vector(mode = "list", length = (nrow(relations) - 1))
-  settings_list <- vector(mode = "list", length = (nrow(relations) - 1))
-  real_AE_list <- vector(mode = "list", length = (nrow(relations) - 1))
   results_list <- vector(mode = "list", length = length(event_type))
 
   # iterate over event types
   for (e in seq_len(length(event_type))) {
+    # empty lists
+    plot_list_threshold <- vector(mode = "list", length = (nrow(relations) - 1))
+    settings_list <- vector(mode = "list", length = (nrow(relations) - 1))
+    real_AE_list <- vector(mode = "list", length = (nrow(relations) - 1))
+
+
     # iterate over stations
     for (i in seq_len(nrow(relations) - 1)) {
       STATIONS <- relations$station[i + 0:1]
@@ -638,23 +726,36 @@ peaktrace  <- function(relation_path, events_path, initial_values_path,
       Sy <- utils::read.csv(Sy)
       Sy$station <- rep(STATIONS[2], nrow(Sy))
 
+      # keep only real AEs previously identified
+      if (i > 1) {
+          IDs <- real_AE_list[[i-1]][, c("id.y", "time.y")] |>
+            dplyr::mutate(time.y = as.character(time.y))
+          Sx <- dplyr::inner_join(Sx, IDs, c("ID" = "id.y", "Time" = "time.y"))
+      }
+
       # difference between 2 stations (translation time)
       relation <- relations[vapply(STATIONS, grep, relations$station,
                                    FUN.VALUE = numeric(1)), ]
 
       # save all together afterwards
       results_list[[e]] <- estimate_AE(Sx = Sx, Sy = Sy, relation = relation,
-                                       timeLag = timeLag, TimeFormat = TimeFormat,
-                                       tz = tz)
+                                       timeLag = timeLag, unique = unique,
+                                       TimeFormat = TimeFormat, tz = tz)
+
       settings_list[[i]] <- results_list[[e]]$settings
       plot_list_threshold[[i]] <- results_list[[e]]$plot_threshold
-      real_AE_list[[i]] <- results_list[[e]]$real_AE
+      real_AE_list[i] <- list(results_list[[e]]$real_AE)
 
-      initials <- impute_initials(real_AE_list[[i]], initials, impute_method)
-
+      if (is.null(real_AE_list)) {
+        break
+      } else {
+        initials <- impute_initials(real_AE_list[[i]], initials, impute_method)
+      }
     }
 
     results_list[[e]]$settings <- do.call(rbind, settings_list)
+
+    plot_list_threshold <- plot_list_threshold[!sapply(plot_list_threshold, is.null)]
     results_list[[e]]$plot_threshold <- gridExtra::arrangeGrob(grobs = plot_list_threshold,
                                                                nrow = 1)
     results_list[[e]]$real_AE <- do.call(rbind, real_AE_list)
@@ -756,6 +857,23 @@ routing <- function(real_AE, initials, relation, formula = y ~ x,
 
   routing_list <- vector(mode = "list", length = 3)
 
+  ## keep only real AEs with > 1 events per group
+  real_AE_split <- real_AE |>
+    dplyr::group_by(id.x, id.y) |>
+    dplyr::group_split()
+
+  keep <- which(lapply(real_AE_split, nrow) > 1)
+  delete <- which(lapply(real_AE_split, nrow) <= 1)
+
+  if (length(delete) > 0) {
+    lapply(real_AE_split[delete], function(x)
+               warning(paste("Less than 2 AEs:",
+                             paste0("Event type ", unique(x$event_type.x), ","),
+                             "ID Sx:", unique(x$id.x), "ID Sy:", unique(x$id.y))))
+  }
+
+  real_AE <- do.call("rbind", real_AE_split[keep])
+
   ## scatter plots
   routing_list[[1]] <- real_AE |>
     dplyr::group_by(id.x, id.y) |>
@@ -774,6 +892,15 @@ routing <- function(real_AE, initials, relation, formula = y ~ x,
   models <- do.call(rbind, lapply(model_list, function(x) x[["models"]]))
 
   routing_list[[2]] <- do.call(rbind, lapply(model_list, function(x) x[["models.df"]]))
+
+  ## omit models not used for predictions
+  routing_list[[2]] <- routing_list[[2]] |>
+    dplyr::left_join(initials |>
+                     dplyr::transmute(station = station,
+                                      metric = tolower(metric)) |>
+                     unique(), by = "metric") |>
+    dplyr::filter(station.x >= station) |>
+    dplyr::select(-station)
 
   ## predictions
   predictions <- get_predictions(models = models, initials = initials)
@@ -820,7 +947,7 @@ routing <- function(real_AE, initials, relation, formula = y ~ x,
 #' @description For given relation and event data return the
 #'     associated events which comply with the conditions specified in
 #'     the settings.
-#' @param relation_path Character string containing the path of the file which
+#' @param relation_path Character string containing the path of the file where
 #'     the relation file is to be read from with
 #'     \code{\link[utils:read.csv]{utils::read.csv()}}. The file must contain a
 #'     column \code{ID} that contains the gauging station ID's in the file have to be
@@ -829,25 +956,37 @@ routing <- function(real_AE, initials, relation, formula = y ~ x,
 #'     where the event files corresponding to the `relation` file are located. Only
 #'     relevant files in this directory will be used, i.e., files that are related to
 #'     the `relation` file.
-#' @param settings_path Character string containing the path of the file which
+#' @param settings_path Character string containing the path of the file where
 #'     the settings file is to be read from with
-#'     \code{\link[utils:read.csv]{utils::read.csv()}}. The file must be in format
+#'     \code{\link[utils:read.csv]{utils::read.csv()}}. The file must be in the format
 #'     of the output of \code{\link[=peaktrace]{peaktrace()}}.
+#' @param unique Character string specifying if the potential AEs which
+#'     meet the \code{timeLag} and \code{metricLag} condition should
+#'     be filtered to contain only unique events using \code{"time"},
+#'     i.e., by selecting those where the time difference is smallest
+#'     compared to the specified factor of the mean translation time, or using
+#'     \code{"metric"}, i.e., by selecting those where the relative
+#'     difference in amplitude is smallest (default: \code{"time"}).
 #' @param inputdec Character string for decimal points in input data.
 #' @param inputsep Field separator character string for input data.
-#' @param saveResults A logical. If \code{FALSE} (default), the generated plot
-#'     and the estimated settings are not saved. Otherwise the settings are written
-#'     to a csv file and the plot are saved as png.
-#' @param outdir Character string naming a directory where the estimated
-#'     settings should be saved to.
+#' @param saveResults A logical. If \code{FALSE} (default), the extracted AEs are not saved.
+#'     Otherwise the extracted AEs are written to a csv file.
+#' @param outdir Character string naming a directory where the extraced AEs
+#'     should be saved to.
 #' @param TimeFormat Character string giving the date-time format of the
 #'     date-time column in the input data frame (default: "\%Y-\%m-\%d \%H:\%M").
 #' @param tz Character string specifying the time zone to be used for the
 #'     conversion (default: "Etc/GMT-1").
 #'
-#' @return A data frame containing \dQuote{real} AEs (i.e., events where the relative
-#'     difference in amplitude is within the cut points provided by the file
-#'     in \code{settings_path}).
+#' @return A data frame containing \dQuote{real} AEs (i.e., events
+#'     where the time differences and the relative difference in
+#'     amplitude is within the limits and cut points provided by the
+#'     file in \code{settings_path}). If no AEs can be found between the first
+#'     two neighboring stations, \code{NULL} is returned. Otherwise the function
+#'     returns all \dQuote{real} AEs that could be found along the river section
+#'     specified in the file from \code{relation_path}. A warning is issued when
+#'     the extraction is stopped early and shows the \code{IDs} for which no
+#'     AEs are determined.
 #' @export
 #'
 #' @examples
@@ -857,9 +996,12 @@ routing <- function(real_AE, initials, relation, formula = y ~ x,
 #'                                    package = "hydroroute")
 #' real_AE <- extract_AE(relation_path, events_path, settings_path)
 extract_AE <- function(relation_path, events_path, settings_path,
+                       unique = c("time", "metric"),
                        inputdec = ".", inputsep = ",",
                        saveResults = FALSE, outdir = tempdir(),
                        TimeFormat = "%Y-%m-%d %H:%M", tz = "Etc/GMT-1") {
+
+  unique <- match.arg(unique)
 
   stopifnot(is.character(relation_path) & length(relation_path) == 1)
   stopifnot(is.character(events_path) & length(events_path) == 1)
@@ -881,6 +1023,7 @@ extract_AE <- function(relation_path, events_path, settings_path,
                                dec = inputdec, header = TRUE)
 
   colnames(settings) <- tolower(colnames(settings))
+  stopifnot(all(c("station.x", "station.y", "bound", "lag", "metric") %in% colnames(settings)))
 
   events_files <- list.files(events_path, recursive = TRUE)
 
@@ -904,6 +1047,7 @@ extract_AE <- function(relation_path, events_path, settings_path,
   # iterate over stations
   for (i in seq_len(nrow(relations) - 1)) {
     STATIONS <- relations$station[i + 0:1]
+    real_AE <- NULL
 
     # load data
     Sx <- file.path(events_path, events_files[grepl(paste0("^",
@@ -923,6 +1067,13 @@ extract_AE <- function(relation_path, events_path, settings_path,
     Sy <- utils::read.csv(Sy)
     Sy$station <- rep(STATIONS[2], nrow(Sy))
 
+    # keep only real AEs previously identified
+    if (i > 1) {
+        IDs <- real_AE_list[[i-1]][, c("id.y", "time.y")] |>
+          dplyr::mutate(time.y = as.character(time.y))
+        Sx <- dplyr::inner_join(Sx, IDs, c("ID" = "id.y", "Time" = "time.y"))
+    }
+
     # difference between 2 stations (translation time)
     relation <- relations[vapply(STATIONS, grep, relations$station,
                                  FUN.VALUE = numeric(1)), ]
@@ -930,32 +1081,40 @@ extract_AE <- function(relation_path, events_path, settings_path,
     setting <- settings |>
       dplyr::filter(station.x == STATIONS[1], station.y == STATIONS[2])
 
-    # events, exact time matches
+    # lag_opt
+    lag <- ifelse(is.na(relation$lag), "00:00", as.character(relation$lag))
+    lag_opt <- diff(as.difftime(lag, format = "%H:%M", units = "mins")) *
+        setting$lag[2]
+
     events <- merge_time(Sx = Sx, Sy = Sy, relation = relation, timeLag = setting$lag,
                          TimeFormat = TimeFormat, tz = tz)
 
-    # potential AE, AMP within fixed interval
     potential_AE <- potential_AE(Sx = Sx, Sy = Sy, relation = relation,
-                                 timeLag = setting$lag,
+                                 timeLag = setting$lag, unique = unique,
                                  TimeFormat = TimeFormat, tz = tz)
 
-    # estimate cut points
-    potential_AE_subset <- potential_AE |>
+    if (!is.null(potential_AE)) {
+      potential_AE_subset <- potential_AE |>
       dplyr::filter(metric == "amp")
 
-    # real AEs
-    # filter events within estimated cut points (settings)
-    events <- events |>
-      dplyr::inner_join(potential_AE_subset |> dplyr::select(station.x, time.x, station.y,
-                                                             time.y, diff_metric),
-                        by = c("station.x", "time.x", "station.y", "time.y"))
+      # real AEs
+      # filter events within estimated cut points (settings)
+      events <- events |>
+        dplyr::inner_join(potential_AE_subset |>
+                          dplyr::select(station.x, time.x, station.y,
+                                        time.y, diff_metric),
+                          by = c("station.x", "time.x", "station.y", "time.y"))
 
-    real_AE <- events |>
-      dplyr::filter(dplyr::between(diff_metric + 1, setting$metric[1],
-                                   setting$metric[3]))
+      real_AE <- events |>
+        dplyr::filter(dplyr::between(diff_metric + 1, setting$metric[1],
+                                     setting$metric[3]))
 
-    # save all together afterwards
-    real_AE_list[[i]] <- real_AE
+      # save all together afterwards
+      real_AE_list[[i]] <- real_AE
+    } else {
+      warning(paste0("No potential AEs between ", unique(Sx$ID), " and ", unique(Sy$ID)))
+      break
+    }
   }
 
   real_AE <- do.call(rbind, real_AE_list)
@@ -963,13 +1122,13 @@ extract_AE <- function(relation_path, events_path, settings_path,
   if (saveResults) {
     writeCSV(real_AE, outdir = outdir, metric = "AMP",
              event = event_type, postfix = "real_AE")
-    }
+  }
 
   invisible(real_AE)
 }
 
 
-#' Reshape
+#' Reshape Q Data
 #' @description Reshapes data frame from \dQuote{wide} format to \dQuote{long} format.
 #' @param x Merged data frame constructed in \code{\link[=merge_time]{merge_time()}}.
 #'
