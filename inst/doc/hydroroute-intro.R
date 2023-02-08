@@ -127,8 +127,8 @@ gridExtra::grid.arrange(grobs = res$`4`$plot_predict$grobs, nrow = 3, ncol = 2)
 ## -----------------------------------------------------------------------------
 relation_path <- system.file("testdata", "relation.csv", package = "hydroroute")
 events_path <- system.file("testdata", "Events", package = "hydroroute")
-settings_path <- system.file("testdata", "Q_event_2_AMP-LAG_settings.csv",
-	                     package = "hydroroute")
+settings_path <- system.file("testdata", "Q_event_2_AMP-LAG_aut_settings.csv",
+                             package = "hydroroute")
 initials_path <- system.file("testdata", "initial_value_routing.csv",
                              package = "hydroroute")
 real_AE <- extract_AE(relation_path, events_path, settings_path)
@@ -147,6 +147,12 @@ res$models
 
 ## ---- fig.width = 8, fig.height = 10------------------------------------------
 gridExtra::grid.arrange(grobs = res$plot_predict$grobs, nrow = 3, ncol = 2)
+
+## -----------------------------------------------------------------------------
+settings_path <- system.file("testdata", package = "hydroroute")
+res <- peaktrace(relation_path, events_path, initial_values_path,
+                 settings_path)
+res$`2`$settings
 
 ## ---- include = FALSE---------------------------------------------------------
 options(old)

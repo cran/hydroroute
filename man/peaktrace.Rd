@@ -8,6 +8,7 @@ peaktrace(
   relation_path,
   events_path,
   initial_values_path,
+  settings_path,
   unique = c("time", "metric"),
   inputdec = ".",
   inputsep = ",",
@@ -37,6 +38,13 @@ the `relation' file.}
 
 \item{initial_values_path}{Character string containing the path of the file
 which contains initial values for predictions (see vignette).}
+
+\item{settings_path}{Character string containing the path where the
+settings files are to be read from with
+\code{\link[utils:read.csv]{utils::read.csv()}} if
+available. The settings files must be in the format of the
+output of \code{\link[=peaktrace]{peaktrace()}}. If missing or
+incomplete, the settings are determined automatically.}
 
 \item{unique}{Character string specifying if the potential AEs which
 meet the \code{timeLag} and \code{metricLag} condition should

@@ -43,7 +43,8 @@ conversion (default: "Etc/GMT-1").}
 }
 \value{
 Data frame that has a matched event at \eqn{S_{x}}{S_x} and
-    \eqn{S_{y}}{S_y} in each row.
+    \eqn{S_{y}}{S_y} in each row. If no matches are detected,
+    \code{NULL} is returned.
 }
 \description{
 Given two event data frames of neighboring stations

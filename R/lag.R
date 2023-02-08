@@ -441,3 +441,20 @@ min_to_hhmm <- function(minutes) {
   hhmm <- paste(hh, mm, sep = ":")
   hhmm
 }
+
+#' Convert HH:MM Format to Minutes
+#'
+#' @param x A character vector containing entries in HH:MM format.
+#' @return A `difftime` object with units "mins".
+#'
+#' @keywords internal
+#' @noRd
+hhmm_to_min <- function(x) {
+    stopifnot(is.character(x))
+    x <- strsplit(x, ":")
+    stopifnot(all(vapply(x, length, integer(1)) == 2))
+    x <- vapply(x, function(y)
+        sum(as.integer(y) * c(60L, 1L)),
+        integer(1))
+    as.difftime(x, units = "mins")
+}

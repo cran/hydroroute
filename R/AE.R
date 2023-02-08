@@ -82,8 +82,7 @@ potential_AE <- function(Sx, Sy, relation, timeLag = c(1, 1, 1), metricLag = c(1
 
   # lag_opt
   lag <- ifelse(is.na(relation$lag), "00:00", as.character(relation$lag))
-  lag_opt <- diff(as.difftime(lag, format = "%H:%M", units = "mins")) *
-    timeLag[2]
+  lag_opt <- diff(hhmm_to_min(lag)) * timeLag[2]
 
   # get all events with time matches
   events <- merge_time(Sx, Sy, relation, timeLag, TimeFormat, tz)
@@ -221,7 +220,7 @@ merge_time <- function(Sx, Sy, relation, timeLag = c(1, 1, 1),
 
   relation$lag <- ifelse(is.na(relation$lag), "00:00",
                          as.character(relation$lag))
-  relation$lag <- as.difftime(relation$lag, format = "%H:%M", units = "mins")
+  relation$lag <- hhmm_to_min(relation$lag)
 
   # RATIO does not make sense for S1 if not type 'Gauge'
   if ("S1" %in% relation$station) {
@@ -463,6 +462,12 @@ get_bounds <- function(pars) {
 #'     "\%Y-\%m-\%d \%H:\%M").
 #' @param tz Character string specifying the time zone to be used for
 #'     the conversion (default: "Etc/GMT-1").
+#' @param settings Data.frame with 3 rows and columns
+#'     \code{station.x}, \code{station.y}, \code{bound}, \code{lag},
+#'     \code{metric}. \code{lag} needs to correspond to the unique
+#'     value specified in argument \code{timeLag} and \code{bound}
+#'     needs to contain \code{"lower"}, \code{"inner"},
+#'     \code{"upper"}.
 #'
 #' @return A nested list containing the estimated settings, the
 #'     histogram obtained for the relative difference data with
@@ -490,7 +495,8 @@ get_bounds <- function(pars) {
 #' results$real_AE
 estimate_AE <- function(Sx, Sy, relation, timeLag = c(1, 1, 1), metricLag = c(1, 1),
                         unique = c("time", "metric"),
-                        TimeFormat = "%Y-%m-%d %H:%M", tz = "Etc/GMT-1") {
+                        TimeFormat = "%Y-%m-%d %H:%M", tz = "Etc/GMT-1",
+                        settings = NULL) {
   unique <- match.arg(unique)
 
   colnames(relation) <- tolower(colnames(relation))
@@ -524,7 +530,21 @@ estimate_AE <- function(Sx, Sy, relation, timeLag = c(1, 1, 1), metricLag = c(1,
   potential_AE <- potential_AE(Sx = Sx, Sy = Sy, relation = relation,
                                timeLag = timeLag, metricLag = metricLag,
                                unique = unique, TimeFormat = TimeFormat, tz = tz)
-  settings <- NULL
+
+  # lag in settings and timeLag must match
+  if (!is.null(settings)) {
+      stopifnot(length(unique(timeLag)) == 1)
+      stopifnot(nrow(settings) == 3)
+      stopifnot(all(settings$station.x == potential_AE$station.x[1]),
+                all(settings$station.y == potential_AE$station.y[1]),
+                all(settings$lag == unique(timeLag)),
+                all(settings$bound %in% c("lower", "inner", "upper")),
+                !anyDuplicated(settings$bound),
+                !anyNA(settings$metric))
+      settings <- settings |>
+          dplyr::arrange(metric)
+  }
+
   plot_threshold <- NULL
   real_AE <- NULL
 
@@ -535,22 +555,28 @@ estimate_AE <- function(Sx, Sy, relation, timeLag = c(1, 1, 1), metricLag = c(1,
 
     # relative difference data binned into intervals from -1 to 1 of width 0.1
     freq_dist <- table(cut(potential_AE_subset$diff_metric, seq(-1, 1, by = 0.1)))
-    prop_dist <- freq_dist / sum(freq_dist)
 
-    pars <- get_parabola(prop_dist)
+    if (is.null(settings)) {
+        prop_dist <- freq_dist / sum(freq_dist)
 
-    # cut points (or strict criterion)
-    bounds <- get_bounds(pars)
+        pars <- get_parabola(prop_dist)
 
-    # fitted cut points -> relative difference
-    metric_est <- bounds + 1
+        # cut points (or strict criterion)
+        bounds <- get_bounds(pars)
 
-    # estimated settings
-    settings <- cbind.data.frame(station.x = rep(potential_AE$station.x[1], 3),
-                                 station.y = rep(potential_AE$station.y[1], 3),
-                                 bound = c("lower", "inner", "upper"),
-                                 lag = timeLag,
-                                 metric = c(metric_est[1], mean(metric_est), metric_est[2]))
+        # fitted cut points -> relative difference
+        metric_est <- bounds + 1
+
+        # estimated settings
+        settings <- cbind.data.frame(station.x = rep(potential_AE$station.x[1], 3),
+                                     station.y = rep(potential_AE$station.y[1], 3),
+                                     bound = c("lower", "inner", "upper"),
+                                     lag = timeLag,
+                                     metric = c(metric_est[1], mean(metric_est), metric_est[2]))
+    } else {
+        pars <- NULL
+        bounds <- settings$metric[c(1, 3)] - 1
+    }
 
     # real AEs
     # filter events within estimated cut points (settings)
@@ -562,6 +588,9 @@ estimate_AE <- function(Sx, Sy, relation, timeLag = c(1, 1, 1), metricLag = c(1,
     real_AE <- events |>
       dplyr::filter(dplyr::between(diff_metric + 1, settings$metric[1],
                                    settings$metric[3]))
+    if (nrow(real_AE) == 0) {
+        real_AE <- NULL
+    }
 
     # threshold plot
     plot_threshold <- plot_threshold(freq_dist, pars, bounds,
@@ -596,6 +625,12 @@ estimate_AE <- function(Sx, Sy, relation, timeLag = c(1, 1, 1), metricLag = c(1,
 #'     the `relation' file.
 #' @param initial_values_path Character string containing the path of the file
 #'     which contains initial values for predictions (see vignette).
+#' @param settings_path Character string containing the path where the
+#'     settings files are to be read from with
+#'     \code{\link[utils:read.csv]{utils::read.csv()}} if
+#'     available. The settings files must be in the format of the
+#'     output of \code{\link[=peaktrace]{peaktrace()}}. If missing or
+#'     incomplete, the settings are determined automatically.
 #' @param unique Character string specifying if the potential AEs which
 #'     meet the \code{timeLag} and \code{metricLag} condition should
 #'     be filtered to contain only unique events using \code{"time"},
@@ -644,7 +679,7 @@ estimate_AE <- function(Sx, Sy, relation, timeLag = c(1, 1, 1), metricLag = c(1,
 #'     coefficients, number of observations and \eqn{R^2}, and a plot of predicted
 #'     values based on the \dQuote{initial values}.
 #' @export
-peaktrace  <- function(relation_path, events_path, initial_values_path,
+peaktrace  <- function(relation_path, events_path, initial_values_path, settings_path,
                        unique = c("time", "metric"),
                        inputdec = ".", inputsep = ",", event_type = c(2, 4),
                        saveResults = FALSE, outdir = tempdir(),
@@ -703,6 +738,14 @@ peaktrace  <- function(relation_path, events_path, initial_values_path,
     settings_list <- vector(mode = "list", length = (nrow(relations) - 1))
     real_AE_list <- vector(mode = "list", length = (nrow(relations) - 1))
 
+    if (!missing(settings_path)) {
+        file <- file.path(settings_path, paste0("Q_event_", event_type[e], "_AMP-LAG_settings.csv"))
+        if (file.exists(file)) {
+            settings_list_provided <- utils::read.csv(file = file, sep = ",", dec = ".")
+        } else {
+            settings_list_provided <- NULL
+        }
+    }
 
     # iterate over stations
     for (i in seq_len(nrow(relations) - 1)) {
@@ -723,13 +766,15 @@ peaktrace  <- function(relation_path, events_path, initial_values_path,
 
       Sx <- utils::read.csv(Sx)
       Sx$station <- rep(STATIONS[1], nrow(Sx))
+      Sx$Time <- as.POSIXct(strptime(Sx$Time, format = TimeFormat, tz = tz))
       Sy <- utils::read.csv(Sy)
       Sy$station <- rep(STATIONS[2], nrow(Sy))
+      Sy$Time <- as.POSIXct(strptime(Sy$Time, format = TimeFormat, tz = tz))
 
       # keep only real AEs previously identified
       if (i > 1) {
           IDs <- real_AE_list[[i-1]][, c("id.y", "time.y")] |>
-            dplyr::mutate(time.y = as.character(time.y))
+            dplyr::mutate(time.y = time.y)
           Sx <- dplyr::inner_join(Sx, IDs, c("ID" = "id.y", "Time" = "time.y"))
       }
 
@@ -738,15 +783,27 @@ peaktrace  <- function(relation_path, events_path, initial_values_path,
                                    FUN.VALUE = numeric(1)), ]
 
       # save all together afterwards
+      settings <- NULL
+      if (!missing(settings_path) && !is.null(settings_list_provided)) {
+          settings <- settings_list_provided |>
+              dplyr::filter(station.x == STATIONS[1],
+                            station.y == STATIONS[2],
+                            !is.na(metric))
+          if (nrow(settings) == 0) {
+              settings <- NULL
+          }
+      }
+
       results_list[[e]] <- estimate_AE(Sx = Sx, Sy = Sy, relation = relation,
                                        timeLag = timeLag, unique = unique,
-                                       TimeFormat = TimeFormat, tz = tz)
+                                       TimeFormat = TimeFormat, tz = tz,
+                                       settings = settings)
 
       settings_list[[i]] <- results_list[[e]]$settings
       plot_list_threshold[[i]] <- results_list[[e]]$plot_threshold
       real_AE_list[i] <- list(results_list[[e]]$real_AE)
 
-      if (is.null(real_AE_list)) {
+      if (is.null(real_AE_list[[i]])) {
         break
       } else {
         initials <- impute_initials(real_AE_list[[i]], initials, impute_method)
@@ -992,7 +1049,7 @@ routing <- function(real_AE, initials, relation, formula = y ~ x,
 #' @examples
 #' relation_path <- system.file("testdata", "relation.csv", package = "hydroroute")
 #' events_path <- system.file("testdata", "Events", package = "hydroroute")
-#' settings_path <- system.file("testdata", "Q_event_2_AMP-LAG_settings.csv",
+#' settings_path <- system.file("testdata", "Q_event_2_AMP-LAG_aut_settings.csv",
 #'                                    package = "hydroroute")
 #' real_AE <- extract_AE(relation_path, events_path, settings_path)
 extract_AE <- function(relation_path, events_path, settings_path,

@@ -1,5 +1,16 @@
 \name{NEWS}
 \title{News for Package 'hydroroute'}
+\section{Changes in hydroroute version 0.1.2}{
+  \itemize{
+    \item Bug fixed in `peaktrace` in case no potential AEs are
+    identified.
+    \item Bug fixed in `peaktrace` to allow for lags of more than 24
+    hours.
+    \item Argument added to `peaktrace` and `estimate_AE` to allow
+    specify settings manually, e.g., to override the automatic
+    settings.
+  }
+}
 \section{Changes in hydroroute version 0.1.1}{
   \itemize{
     \item Ensure that `get_lag_dir` uses `mc.cores = 1` when calling

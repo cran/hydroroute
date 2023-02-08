@@ -532,8 +532,8 @@ generated with `estimate_AE()`.
 ```{r}
 relation_path <- system.file("testdata", "relation.csv", package = "hydroroute")
 events_path <- system.file("testdata", "Events", package = "hydroroute")
-settings_path <- system.file("testdata", "Q_event_2_AMP-LAG_settings.csv",
-	                     package = "hydroroute")
+settings_path <- system.file("testdata", "Q_event_2_AMP-LAG_aut_settings.csv",
+                             package = "hydroroute")
 initials_path <- system.file("testdata", "initial_value_routing.csv",
                              package = "hydroroute")
 real_AE <- extract_AE(relation_path, events_path, settings_path)
@@ -571,6 +571,31 @@ res$models
 gridExtra::grid.arrange(grobs = res$plot_predict$grobs, nrow = 3, ncol = 2)
 ```
 
+## Use `peaktrace()` with existing settings
+
+It the automatically determined settings using `peaktrace()` are not
+suitable, the settings files can be edited to insert manual
+settings. In the following we use a path to a settings file for event
+type `2` where between S2 and S3 the settings were modified to 0.75, 1
+and 1.5 and no settings are provided for subsequent pairs of
+stations. Function `peaktrace()` is called again providing also the
+path to this settings file and the resulting settings for event type
+`2` are inspected:
+
+```{r}
+settings_path <- system.file("testdata", package = "hydroroute")
+res <- peaktrace(relation_path, events_path, initial_values_path,
+                 settings_path)
+res$`2`$settings
+```
+
+The procedure is then applied without determining the settings in an
+automatic way, but using those specified. The settings files can also
+only provide settings for some relations between neighboring stations
+which are then used, while for those relations between neighboring
+stations where no settings are provided, these are again determined
+using the automatic procedure.
+
 ```{r, include = FALSE}
 options(old)
 ```
@@ -579,11 +604,11 @@ options(old)
 
 Greimel F, Zeiringer B, Höller N, Grün B, Godina R, Schmutz S
 (2016). "A Method to Detect and Characterize Sub-Daily Flow
-Fluctuations." Hydrological Processes, 30(13), 2063-2078. doi:
-10.1002/hyp.10773
+Fluctuations." Hydrological Processes, 30(13), 2063-2078. 
+doi: 10.1002/hyp.10773
 
 Greimel F, Grün B, Hayes DS, Höller N, Haider J, Zeiringer B,
 Holzapfel P, Hauer C, Schmutz S (2022). "PeakTrace: Routing of
 Hydropower Plant-Specific Hydropeaking Waves Using Multiple
 Hydrographs - A Novel Approach." River Research and Applications,
-accepted with minor revisions.
+1-14. doi: 10.1002/rra.3978

@@ -1,20 +1,17 @@
-citHeader("To cite hydroroute in publications use:")
-
-citEntry(
-  entry    = "Article",
+bibentry(
+  bibtype    = "Article",
   title    = "{PeakTrace}: Routing of Hydropeaking Waves Using Multiple Hydrographs – A Novel Approach",
-  author   = personList(person(given = "Franz", family = "Greimel"),
-                        person(given = "Bettina", family = "Grün"),
-                        person(given = "Daniel S.", family = "Hayes"),
-                        person(given = "Norbert", family = "Höller"),
-                        person(given = "Julia", family = "Haider"),
-                        person(given = "Bernhard", family = "Zeiringer"),
-                        person(given = "Patrick", family = "Holzapfel"),
-                        person(given = "Christoph", family = "Hauer"),
-                        person(given = "Stefan", family = "Schmutz")),
+  author   = c(person(given = "Franz", family = "Greimel"),
+               person(given = "Bettina", family = "Grün"),
+               person(given = "Daniel S.", family = "Hayes"),
+               person(given = "Norbert", family = "Höller"),
+               person(given = "Julia", family = "Haider"),
+               person(given = "Bernhard", family = "Zeiringer"),
+               person(given = "Patrick", family = "Holzapfel"),
+               person(given = "Christoph", family = "Hauer"),
+               person(given = "Stefan", family = "Schmutz")),
   journal  = "River Research and Applications",
   year     = "2022",
-  note     = "accepted with minor revisions",
-  textVersion = paste("Franz Greimel et al. PeakTrace: Routing of hydropeaking waves using multiple hydrographs – a novel approach.",
-                      "River Research and Applications, accepted with minor revisions, 2022.")
+  pages    = "1--14",
+  doi      = "10.1002/rra.3978",
 )

@@ -12,7 +12,8 @@ estimate_AE(
   metricLag = c(1, 1),
   unique = c("time", "metric"),
   TimeFormat = "\%Y-\%m-\%d \%H:\%M",
-  tz = "Etc/GMT-1"
+  tz = "Etc/GMT-1",
+  settings = NULL
 )
 }
 \arguments{
@@ -66,6 +67,13 @@ the date-time column in the input data frame (default:
 
 \item{tz}{Character string specifying the time zone to be used for
 the conversion (default: "Etc/GMT-1").}
+
+\item{settings}{Data.frame with 3 rows and columns
+\code{station.x}, \code{station.y}, \code{bound}, \code{lag},
+\code{metric}. \code{lag} needs to correspond to the unique
+value specified in argument \code{timeLag} and \code{bound}
+needs to contain \code{"lower"}, \code{"inner"},
+\code{"upper"}.}
 }
 \value{
 A nested list containing the estimated settings, the

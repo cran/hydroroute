@@ -1,7 +1,7 @@
 utils::globalVariables(c("name", "station", "time", "prediction",
                          "unit", "r2", "type", "value", "max_val",
                          "value.scaled", "n", "stations", "metric_name",
-                         "..rr.label..", "breaks", "prop"))
+                         "rr.label", "breaks", "prop"))
 
 #' Generate Scatter Plot
 #'
@@ -72,7 +72,7 @@ plot_scatter <- function(AE, axis = TRUE, accuracy = NULL) {
       ggplot2::xlab(data_sub$unit[1]) +
       ggplot2::ylab(data_sub$unit[1]) +
       ggplot2::geom_smooth(formula = y ~ x, method = "lm") +
-      ggpmisc::stat_poly_eq(ggplot2::aes(label = ..rr.label..),
+      ggpmisc::stat_poly_eq(ggplot2::aes(label = ggplot2::after_stat(rr.label)),
                             formula = y ~ x, colour = "blue",
                             label.x.npc = "right", label.y.npc = "bottom")
 

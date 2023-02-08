@@ -65,9 +65,9 @@ A data frame containing \dQuote{real} AEs (i.e., events
     file in \code{settings_path}). If no AEs can be found between the first
     two neighboring stations, \code{NULL} is returned. Otherwise the function
     returns all \dQuote{real} AEs that could be found along the river section
-    specified in the file from \code{relation_path}. A warning message informs when
-    the extraction has stopped early and shows the \code{IDs} for which no
-    AEs could be found.
+    specified in the file from \code{relation_path}. A warning is issued when
+    the extraction is stopped early and shows the \code{IDs} for which no
+    AEs are determined.
 }
 \description{
 For given relation and event data return the
@@ -77,7 +77,7 @@ For given relation and event data return the
 \examples{
 relation_path <- system.file("testdata", "relation.csv", package = "hydroroute")
 events_path <- system.file("testdata", "Events", package = "hydroroute")
-settings_path <- system.file("testdata", "Q_event_2_AMP-LAG_settings.csv",
+settings_path <- system.file("testdata", "Q_event_2_AMP-LAG_aut_settings.csv",
                                    package = "hydroroute")
 real_AE <- extract_AE(relation_path, events_path, settings_path)
 }
